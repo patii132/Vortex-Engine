@@ -164,7 +164,7 @@ namespace vortex::graphics::dx12
 		// descriptor always exists wherever the standard PS runs.
 		// Param 13 is the SSAO texture table (t10, #32) — the blurred half-res AO the standard PS
 		// multiplies into the ambient term only (sampled with the s2 linear-clamp sampler).
-		D3D12_ROOT_PARAMETER params[14] = {};
+		D3D12_ROOT_PARAMETER params[15] = {};
 
 		params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
 		params[0].Descriptor.ShaderRegister = 0;
@@ -178,7 +178,7 @@ namespace vortex::graphics::dx12
 		params[2].Descriptor.ShaderRegister = 2;
 		params[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
-		static D3D12_DESCRIPTOR_RANGE srv_ranges[10] = {};
+		static D3D12_DESCRIPTOR_RANGE srv_ranges[11] = {};
 		for (int i = 0; i < 5; i++)
 		{
 			srv_ranges[i].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
@@ -251,6 +251,16 @@ namespace vortex::graphics::dx12
 		params[13].DescriptorTable.NumDescriptorRanges = 1;
 		params[13].DescriptorTable.pDescriptorRanges = &srv_ranges[9];
 		params[13].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+		// Environment map descriptor table at t11 (pixel) — the sky as a reflection (IBL step 2).
+		srv_ranges[10].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+		srv_ranges[10].NumDescriptors = 1;
+		srv_ranges[10].BaseShaderRegister = 11;
+		srv_ranges[10].RegisterSpace = 0;
+		srv_ranges[10].OffsetInDescriptorsFromTableStart = 0;
+		params[14].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+		params[14].DescriptorTable.NumDescriptorRanges = 1;
+		params[14].DescriptorTable.pDescriptorRanges = &srv_ranges[10];
+		params[14].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
 		D3D12_STATIC_SAMPLER_DESC samplers[3] = {};
 		samplers[0].Filter = D3D12_FILTER_ANISOTROPIC;
@@ -300,7 +310,7 @@ namespace vortex::graphics::dx12
 		samplers[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
 		D3D12_ROOT_SIGNATURE_DESC desc{};
-		desc.NumParameters = 14;
+		desc.NumParameters = 15;
 		desc.pParameters = params;
 		desc.NumStaticSamplers = 3;
 		desc.pStaticSamplers = samplers;

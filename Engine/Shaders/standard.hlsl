@@ -155,6 +155,7 @@ Texture2D CsmShadowMap     : register(t8);
 Texture2D PointShadowMap   : register(t9);
 // t10: the blurred half-res SSAO texture (#32) — multiplied into the ambient term only.
 Texture2D SsaoTex          : register(t10);
+Texture2D EnvMap           : register(t11);   // the sky as a reflection (IBL step 2)
 SamplerState LinearSampler : register(s0);
 SamplerComparisonState ShadowSampler : register(s1);
 SamplerState ScreenSampler : register(s2);   // linear/clamp for screen-space textures (SSAO)
@@ -391,6 +392,25 @@ float3 SkyIrradiance(float3 n)
     return max(e, 0.0);
 }
 
+// The sky as a reflection (IBL step 2): an equirect of the sky with mips at t11, EnvSky.w = 2 while bound, EnvHorizon.w =
+// its mip count. Radiance was soft-compressed into 8 bits by the baker (straight below 1, x / (1 + x) above) — undone here.
+float2 EnvUV(float3 d)
+{
+    return float2(atan2(d.x, d.z) / (2.0 * 3.14159265) + 0.5, acos(clamp(d.y, -1.0, 1.0)) / 3.14159265);
+}
+float3 DecodeEnv(float3 c)
+{
+    float3 lo = c / 0.75;
+    float3 t = saturate((c - 0.75) / 0.25);
+    float3 hi = 1.0 / max(1.0 - t, 0.0625);
+    return c.x <= 0.75 && c.y <= 0.75 && c.z <= 0.75 ? lo : max(lo, hi);
+}
+float3 SampleEnv(float3 R, float roughness)
+{
+    float lod = saturate(roughness) * max(EnvHorizon.w - 1.0, 0.0);
+    return DecodeEnv(EnvMap.SampleLevel(LinearSampler, EnvUV(R), lod).rgb);
+}
+
 float4 PSMain(PS_IN input) : SV_TARGET
 {
     // Texture repeat scale: multiply UVs so a small tiling texture repeats across a large surface instead of being
@@ -579,7 +599,11 @@ float4 PSMain(PS_IN input) : SV_TARGET
     // pick up the sky instead of turning black; neutral dark gradient when no gradient sky is set.
     float3 R = reflect(-V, N);
     float3 envColor;
-    if (EnvSky.w > 0.5)
+    if (EnvSky.w > 1.5)
+    {
+        envColor = SampleEnv(R, roughness) * AmbientStrength;   // the real sky, blurred by roughness
+    }
+    else if (EnvSky.w > 0.5)
     {
         float3 skyDir = R.y >= 0.0 ? lerp(EnvHorizon.rgb, EnvSky.rgb, pow(saturate(R.y), 0.6))
                                    : lerp(EnvHorizon.rgb, EnvGround.rgb, pow(saturate(-R.y), 0.6));

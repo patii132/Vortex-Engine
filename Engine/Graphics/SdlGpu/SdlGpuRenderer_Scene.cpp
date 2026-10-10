@@ -809,9 +809,14 @@ namespace vortex::graphics::sdlgpu
 		auto& reg = ResourceRegistry::instance();
 		Texture* white = reg.white_texture();
 		SDL_GPUTexture* white_tex = white ? white->texture() : nullptr;
-		SDL_GPUTextureSamplerBinding bindings[10];
+		SDL_GPUTextureSamplerBinding bindings[11];
 		for (auto& b : bindings) { b.texture = white_tex; b.sampler = m_sampler_linear_wrap; }
 		bindings[9] = { m_ssao_current ? m_ssao_current : white_tex, m_sampler_linear_clamp };   // blurred SSAO (slot 9)
+		{
+			// the sky as a reflection (slot 10, IBL step 2): the equirect with mips, wrapped so the seam samples across
+			Texture* env = (m_env_map != id::invalid_id) ? reg.get_texture(m_env_map) : nullptr;
+			bindings[10] = { env && env->is_valid() && env->texture() ? env->texture() : white_tex, m_sampler_linear_wrap };
+		}
 		// Shadow atlases (slots 6..8) with the comparison sampler; the shaders only sample them when a light
 		// asks. A missing atlas falls back to the 1x1 depth texture, NOT to white_tex: these slots are declared
 		// as comparison-sampled depth textures, and a colour texture with a plain sampler is not a legal
@@ -865,7 +870,7 @@ namespace vortex::graphics::sdlgpu
 		// buffer and never see slot 1; custom material vertex shaders are created with two (get_or_compile_pipeline).
 		// Skinned draws push their SkinParams into vertex slot 1 after this call, so they stay unaffected.
 		SDL_PushGPUVertexUniformData(cmd, 1, &obj, sizeof(PerObjectConstants));
-		SDL_BindGPUFragmentSamplers(pass, 0, bindings, 10);
+		SDL_BindGPUFragmentSamplers(pass, 0, bindings, 11);
 	}
 
 	void SdlGpuRenderer::draw_mesh(SDL_GPURenderPass* pass, Mesh* mesh, u32 instance_base, u32 instance_count)

@@ -2476,7 +2476,7 @@ namespace Editor.Core.Services
             if (!_hasSkybox)
             {
                 if (ScriptSky != null) { ApplyScriptSky(ScriptSky); SubmitSkyLight(ScriptSky); }   // a scripted sky needs no Skybox component (#349)
-                else { VortexAPI.EnableSkybox(false); VortexAPI.SetSkyLight(null, false); }
+                else { VortexAPI.EnableSkybox(false); VortexAPI.SetSkyLight(null, false); PushEnvironmentMap(null); }
                 VortexAPI.SetAmbientLightStrength(ScriptAmbientOverride ?? 0.35f);  // 0.35 matches the engine header default
             }
         }
@@ -2503,6 +2503,22 @@ namespace Editor.Core.Services
             }
             catch { c = null; }
             PushSkyLight(c);
+            SkyLight.ReflectionMap m = null;
+            try
+            {
+                if ((skybox.SkyboxType == SkyboxType.Texture || skybox.SkyboxType == SkyboxType.Cubemap) && !string.IsNullOrEmpty(skybox.TexturePath))
+                {
+                    var projectPath = Data.ProjectData.Current?.Path ?? "";
+                    var full = System.IO.Path.IsPathRooted(skybox.TexturePath) ? skybox.TexturePath : System.IO.Path.Combine(projectPath, skybox.TexturePath);
+                    m = SkyLight.ReflectionFromTexture(full, e);
+                }
+                if (m == null && skybox.SkyboxType == SkyboxType.SolidColor)
+                    m = SkyLight.ReflectionFromGradient(skybox.TopColorR * e, skybox.TopColorG * e, skybox.TopColorB * e, skybox.TopColorR * e, skybox.TopColorG * e, skybox.TopColorB * e, skybox.TopColorR * e, skybox.TopColorG * e, skybox.TopColorB * e);
+                if (m == null)
+                    m = SkyLight.ReflectionFromGradient(skybox.TopColorR * e, skybox.TopColorG * e, skybox.TopColorB * e, skybox.HorizonColorR * e, skybox.HorizonColorG * e, skybox.HorizonColorB * e, skybox.BottomColorR * e, skybox.BottomColorG * e, skybox.BottomColorB * e);
+            }
+            catch { m = null; }
+            PushEnvironmentMap(m);
         }
 
         private void SubmitSkyLight(SkyOverride s)
@@ -2522,6 +2538,20 @@ namespace Editor.Core.Services
             }
             catch { c = null; }
             PushSkyLight(c);
+            SkyLight.ReflectionMap m = null;
+            try
+            {
+                if (!string.IsNullOrEmpty(s.TexturePath))
+                {
+                    var projectPath = Data.ProjectData.Current?.Path ?? "";
+                    var full = System.IO.Path.IsPathRooted(s.TexturePath) ? s.TexturePath : System.IO.Path.Combine(projectPath, s.TexturePath);
+                    m = SkyLight.ReflectionFromTexture(full, s.Exposure);
+                }
+                var g = s.Gradient;
+                if (m == null && g != null && g.Length >= 9) m = SkyLight.ReflectionFromGradient(g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7], g[8]);
+            }
+            catch { m = null; }
+            PushEnvironmentMap(m);
         }
 
         private void PushSkyLight(SkyLight.Coefficients c)
@@ -2530,6 +2560,26 @@ namespace Editor.Core.Services
             if (key == _skyLightKey) return;   // the renderer keeps the last coefficients; only changes go over the boundary
             _skyLightKey = key;
             VortexAPI.SetSkyLight(c != null ? c.Sh : null, c != null);
+        }
+
+        // ---- the sky as a reflection (IBL step 2): the picture or gradient as a mipped equirect texture the shaders sample by roughness ----
+        private readonly Dictionary<string, long> _envTextures = new Dictionary<string, long>();
+        private string _envKey;
+
+        private void PushEnvironmentMap(SkyLight.ReflectionMap m)
+        {
+            string key = m != null ? m.Key : "";
+            if (key == _envKey) return;
+            _envKey = key;
+            if (m == null) { VortexAPI.ApplyEnvironmentMap(-1, 0); return; }
+            long id;
+            if (!_envTextures.TryGetValue(key, out id) || id < 0)
+            {
+                try { id = VortexAPI.CreateTextureFromPixels(m.Width, m.Height, m.Rgba, false, true); } catch { id = -1; }
+                _envTextures[key] = id;
+            }
+            int mips = 1 + (int)Math.Floor(Math.Log(Math.Max(m.Width, m.Height), 2.0));
+            VortexAPI.ApplyEnvironmentMap(id, id >= 0 ? mips : 0);
         }
 
         private void SubmitEntityLightsRecursive(GameEntity entity)

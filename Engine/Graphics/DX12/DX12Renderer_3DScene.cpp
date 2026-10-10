@@ -719,6 +719,7 @@ namespace vortex::graphics::dx12
 			m_command_list->SetGraphicsRootDescriptorTable(12, m_point_srv_gpu); // t9 (#25)
 		if (m_ssao_current_srv.ptr != 0)
 			m_command_list->SetGraphicsRootDescriptorTable(13, m_ssao_current_srv); // t10 (#32)
+		{ auto env = env_map_srv(); if (env.ptr != 0) m_command_list->SetGraphicsRootDescriptorTable(14, env); } // t11 (IBL step 2)
 	}
 
 	DX12Particles::View DX12Renderer::particle_view(const DirectX::XMFLOAT4X4& view_projection, const DirectX::XMFLOAT4X4& viewmodel_projection,
@@ -776,6 +777,7 @@ namespace vortex::graphics::dx12
 			m_command_list->SetGraphicsRootDescriptorTable(12, m_point_srv_gpu); // t9 (#25)
 		if (m_ssao_current_srv.ptr != 0)
 			m_command_list->SetGraphicsRootDescriptorTable(13, m_ssao_current_srv); // t10 (#32)
+		{ auto env = env_map_srv(); if (env.ptr != 0) m_command_list->SetGraphicsRootDescriptorTable(14, env); } // t11 (IBL step 2)
 		m_command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 		auto& reg = ResourceRegistry::instance();

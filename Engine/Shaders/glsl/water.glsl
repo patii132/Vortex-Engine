@@ -55,6 +55,7 @@ layout(set = 2, binding = 6) uniform sampler2DShadow u_spot_shadow;
 layout(set = 2, binding = 7) uniform sampler2DShadow u_csm_shadow;
 layout(set = 2, binding = 8) uniform sampler2DShadow u_point_shadow;
 layout(set = 2, binding = 9) uniform sampler2D       u_ssao;
+layout(set = 2, binding = 10) uniform sampler2D      u_env;    // the sky as a reflection (IBL step 2)
 
 float fog_optical_depth(float density, float height_y, float k, vec3 cam, vec3 world_pos)
 {
@@ -126,6 +127,25 @@ float noise2(vec2 p)
 	return mix(mix(hash2(i), hash2(i + vec2(1, 0)), f.x), mix(hash2(i + vec2(0, 1)), hash2(i + vec2(1, 1)), f.x), f.y);
 }
 
+// The sky as a reflection (IBL step 2): an equirect of the sky with mips at binding 10, env_sky.w = 2 while bound,
+// env_horizon.w = its mip count; the baker's 8-bit soft compression (straight below 1, x / (1 + x) above) undone here.
+vec2 env_uv(vec3 d)
+{
+	return vec2(atan(d.x, d.z) / (2.0 * 3.14159265) + 0.5, acos(clamp(d.y, -1.0, 1.0)) / 3.14159265);
+}
+vec3 decode_env(vec3 c)
+{
+	vec3 lo = c / 0.75;
+	vec3 t = clamp((c - 0.75) / 0.25, 0.0, 1.0);
+	vec3 hi = 1.0 / max(1.0 - t, vec3(0.0625));
+	return (c.x <= 0.75 && c.y <= 0.75 && c.z <= 0.75) ? lo : max(lo, hi);
+}
+vec3 sample_env(vec3 R, float roughness, float mips, float lod_min)
+{
+	float lod = max(clamp(roughness, 0.0, 1.0) * max(mips - 1.0, 0.0), lod_min);
+	return decode_env(textureLod(u_env, env_uv(R), lod).rgb);
+}
+
 void main()
 {
 	float depth = max(v_uv.x, 0.0);
@@ -159,7 +179,14 @@ void main()
 
 	vec3 R = reflect(-V, N);
 	vec3 sky_refl;
-	if (frame.env_sky.w > 0.5)
+	if (frame.env_sky.w > 1.5)
+	{
+		// the real sky in the water: never below the horizon (the picture's ground is not the lake's surroundings), and
+		// blurred with distance — far away the per-pixel ripple slopes would only turn the sky's sharp horizon into stripes
+		float lod_min = 4.0 * clamp((cam_dist - 40.0) / 160.0, 0.0, 1.0);
+		sky_refl = sample_env(vec3(R.x, max(R.y, 0.02), R.z), rough, frame.env_horizon.w, lod_min);
+	}
+	else if (frame.env_sky.w > 0.5)
 		sky_refl = R.y >= 0.0 ? mix(frame.env_horizon.rgb, frame.env_sky.rgb, pow(saturate(R.y), 0.5)) : mix(frame.env_horizon.rgb, frame.env_ground.rgb, pow(saturate(-R.y), 0.6));
 	else
 		sky_refl = mix(horizon, sky_color, saturate(R.y)) * 0.8;

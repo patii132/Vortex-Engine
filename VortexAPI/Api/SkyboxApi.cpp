@@ -60,6 +60,13 @@ EDITOR_INTERFACE void SetSkyLight(const float* sh27, int enabled)
 	graphics::Renderer::instance().set_sky_light(sh27, enabled != 0);
 }
 
+// The sky as a REFLECTION (IBL step 2): a registry texture holding a linear equirect of the sky with a mip chain; the
+// PBR shaders sample it by roughness for their environment specular, the water for its sky. invalid id = off.
+EDITOR_INTERFACE void SetEnvironmentMap(id::id_type texture_id, int mip_count)
+{
+	graphics::Renderer::instance().set_environment_map(texture_id, mip_count);
+}
+
 // ============== SKYBOX COMPONENT API (Runtime) ==============
 
 namespace {

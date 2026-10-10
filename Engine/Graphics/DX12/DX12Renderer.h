@@ -324,6 +324,8 @@ namespace vortex::graphics::dx12
 		bool is_skybox_enabled() const { return m_skybox_enabled; }
 		void set_skybox_mode(SkyboxMode mode);
 		// Equirect texture sky (#326): the registry texture the fullscreen sky pass samples in SkyboxMode::Texture.
+		void set_environment_map(id::id_type texture, int mips) { m_env_map = texture; m_env_mips = mips; }
+		D3D12_GPU_DESCRIPTOR_HANDLE env_map_srv() const;
 		void set_skybox_texture(id::id_type texture, float exposure, float rotation_radians)
 		{
 			m_sky_texture = texture; m_sky_exposure = exposure; m_sky_rotation = rotation_radians;
@@ -841,6 +843,9 @@ namespace vortex::graphics::dx12
 		DirectX::XMFLOAT3 m_env_sky{ 0.3f, 0.5f, 0.85f };
 		DirectX::XMFLOAT3 m_env_horizon{ 0.7f, 0.8f, 0.9f };
 		DirectX::XMFLOAT3 m_env_ground{ 0.25f, 0.25f, 0.28f };
+		// the sky as a reflection (IBL step 2): a registry equirect with mips, bound at t11 while valid
+		id::id_type m_env_map{ id::invalid_id };
+		int m_env_mips{ 0 };
 		float m_grid_spacing{ 1.0f };
 		float m_grid_major_interval{ 10.0f };
 		float m_grid_extent{ 200.0f };

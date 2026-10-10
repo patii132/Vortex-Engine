@@ -270,6 +270,7 @@ namespace vortex::graphics::sdlgpu
 		}
 		void set_skybox_solid_color(const DirectX::XMFLOAT3& color) { m_sky_color = m_horizon_color = m_ground_color = color; }
 		void set_sky_light(const float* sh27, bool on) { if (sh27) memcpy(m_sky_sh, sh27, sizeof(m_sky_sh)); m_sky_sh_on = on && sh27 != nullptr; }
+		void set_environment_map(id::id_type texture, int mips) { m_env_map = texture; m_env_mips = mips; }
 		void set_skybox_sun(const DirectX::XMFLOAT3& direction, const DirectX::XMFLOAT3& color, float intensity)
 		{
 			m_sun_direction = direction; m_sun_color = color; m_sun_intensity = intensity;
@@ -630,8 +631,9 @@ namespace vortex::graphics::sdlgpu
 		void fill_environment(PerFrameConstants& f) const
 		{
 			const float on = (m_skybox_enabled && (m_skybox_mode == SkyboxMode::Gradient || m_skybox_mode == SkyboxMode::Texture)) ? 1.0f : 0.0f;
-			f.env_sky = { m_sky_color.x, m_sky_color.y, m_sky_color.z, on };
-			f.env_horizon = { m_horizon_color.x, m_horizon_color.y, m_horizon_color.z, 0.0f };
+			const bool map = on > 0.5f && m_env_map != id::invalid_id && m_env_mips > 0;
+			f.env_sky = { m_sky_color.x, m_sky_color.y, m_sky_color.z, map ? 2.0f : on };   // 2 = a reflection map is bound at slot 10
+			f.env_horizon = { m_horizon_color.x, m_horizon_color.y, m_horizon_color.z, map ? (float)m_env_mips : 0.0f };
 			f.env_ground = { m_ground_color.x, m_ground_color.y, m_ground_color.z, 0.0f };
 		}
 		void draw_grid(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, const FrameView& view);
@@ -810,6 +812,9 @@ namespace vortex::graphics::sdlgpu
 		float m_sky_exposure{ 1.0f };
 		float m_sky_sh[27]{};
 		bool m_sky_sh_on{ false };
+		// the sky as a reflection (IBL step 2): a registry equirect with mips, bound at fragment slot 10 while valid
+		id::id_type m_env_map{ id::invalid_id };
+		int m_env_mips{ 0 };
 		float m_sky_rotation{ 0.0f };
 		DirectX::XMFLOAT3 m_sky_color{ 0.3f, 0.5f, 0.85f };
 		DirectX::XMFLOAT3 m_horizon_color{ 0.7f, 0.8f, 0.9f };
