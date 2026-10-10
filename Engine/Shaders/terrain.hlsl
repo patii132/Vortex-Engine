@@ -360,6 +360,8 @@ float4 PSMain(PS_IN input) : SV_TARGET
     float3 albedo = float3(0.0, 0.0, 0.0);
     float3 nm = float3(0.0, 0.0, 0.0);
     float rough = 0.0;
+    // detail: the layer's own normal map again at 7.3x finer tiling, fading out beyond ~28 m — close-up ripples and grain
+    float detailW = saturate(1.0 - length(CameraPosition - input.worldPos) / 28.0);
     [unroll]
     for (int i = 0; i < 4; ++i)
     {
@@ -371,6 +373,14 @@ float4 PSMain(PS_IN input) : SV_TARGET
         ClampGrad(dx, dy);
         albedo += wi * (HasAlbedoTexture != 0 ? SRGBToLinear(AlbedoTexture.SampleGrad(LinearSampler, a, dx, dy).rgb) : float3(0.5, 0.5, 0.5));
         if (HasNormalTexture != 0) nm += wi * (NormalTexture.SampleGrad(LinearSampler, a, dx, dy).rgb * 2.0 - 1.0);
+        if (HasNormalTexture != 0 && detailW > 0.001)
+        {
+            float2 ad = AtlasUV(uv * 7.3 + 0.37, i);
+            float2 dxd = dx * 7.3, dyd = dy * 7.3;
+            ClampGrad(dxd, dyd);
+            float3 nd = NormalTexture.SampleGrad(LinearSampler, ad, dxd, dyd).rgb * 2.0 - 1.0;
+            nm += wi * detailW * 0.6 * float3(nd.xy, 0.0);
+        }
         if (HasRoughnessTexture != 0) rough += wi * RoughnessTexture.SampleGrad(LinearSampler, a, dx, dy).r;
     }
     albedo *= input.tint.rgb;

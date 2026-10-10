@@ -342,6 +342,8 @@ fragment float4 PSMain(VSOut in [[stage_in]],
     float3 albedo = float3(0.0);
     float3 nm = float3(0.0);
     float rough = 0.0;
+    // detail: the layer's own normal map again at 7.3x finer tiling, fading out beyond ~28 m — close-up ripples and grain
+    float detail_w = saturate(1.0 - length(float3(frame.camera_position) - in.world_pos) / 28.0);
     for (int i = 0; i < 4; ++i)
     {
         float wi = w[i];
@@ -352,6 +354,14 @@ fragment float4 PSMain(VSOut in [[stage_in]],
         clamp_grad(dx, dy);
         albedo += wi * (obj.has_albedo_texture != 0 ? srgb_to_linear(albedo_tex.sample(albedo_smp, a, gradient2d(dx, dy)).rgb) : float3(0.5));
         if (obj.has_normal_texture != 0) nm += wi * (normal_tex.sample(normal_smp, a, gradient2d(dx, dy)).rgb * 2.0 - 1.0);
+        if (obj.has_normal_texture != 0 && detail_w > 0.001)
+        {
+            float2 ad = atlas_uv(uv * 7.3 + 0.37, i);
+            float2 dxd = dx * 7.3, dyd = dy * 7.3;
+            clamp_grad(dxd, dyd);
+            float3 nd = normal_tex.sample(normal_smp, ad, gradient2d(dxd, dyd)).rgb * 2.0 - 1.0;
+            nm += wi * detail_w * 0.6 * float3(nd.xy, 0.0);
+        }
         if (obj.has_roughness_texture != 0) rough += wi * roughness_tex.sample(roughness_smp, a, gradient2d(dx, dy)).r;
     }
     albedo *= in.tint.rgb;

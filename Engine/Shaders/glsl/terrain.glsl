@@ -345,6 +345,8 @@ void main()
 	vec3 albedo = vec3(0.0);
 	vec3 nm = vec3(0.0);
 	float rough = 0.0;
+	// detail: the layer's own normal map again at 7.3x finer tiling, fading out beyond ~28 m — close-up ripples and grain
+	float detail_w = clamp(1.0 - length(frame.camera_position - v_world_pos) / 28.0, 0.0, 1.0);
 	for (int i = 0; i < 4; ++i)
 	{
 		float wi = w[i];
@@ -355,6 +357,14 @@ void main()
 		clamp_grad(dx, dy);
 		albedo += wi * (obj.has_albedo_texture != 0u ? srgb_to_linear(textureGrad(u_albedo, a, dx, dy).rgb) : vec3(0.5));
 		if (obj.has_normal_texture != 0u) nm += wi * (textureGrad(u_normal, a, dx, dy).rgb * 2.0 - 1.0);
+		if (obj.has_normal_texture != 0u && detail_w > 0.001)
+		{
+			vec2 ad = atlas_uv(uv * 7.3 + 0.37, i);
+			vec2 dxd = dx * 7.3, dyd = dy * 7.3;
+			clamp_grad(dxd, dyd);
+			vec3 nd = textureGrad(u_normal, ad, dxd, dyd).rgb * 2.0 - 1.0;
+			nm += wi * detail_w * 0.6 * vec3(nd.xy, 0.0);
+		}
 		if (obj.has_roughness_texture != 0u) rough += wi * textureGrad(u_roughness, a, dx, dy).r;
 	}
 	albedo *= v_tint.rgb;
