@@ -203,6 +203,9 @@ namespace vortex::graphics::sdlgpu
 		void add_point_light(const PointLightData& light);
 		void add_spot_light(const SpotLightData& light);
 		void set_fog(const DirectX::XMFLOAT3& color, float density, float height_y, float height_falloff);
+		void set_scene_exposure(float multiplier) { m_frame_constants.scene_exposure = multiplier > 0.0f ? multiplier : 0.5f; }
+		void set_fog_sun_glow(float glow) { m_frame_constants.fog_sun_glow = glow > 0.0f ? glow : 0.0f; }
+		void set_tonemapper(u32 mode) { m_frame_constants.tonemapper = mode > 1u ? 1u : mode; }
 
 		PostFx& postfx() { return m_postfx; }
 		float elapsed_seconds() const
@@ -259,9 +262,11 @@ namespace vortex::graphics::sdlgpu
 		void set_skybox_mode(SkyboxMode mode) { m_skybox_mode = mode; }
 		// Equirect texture sky (#326): the registry texture the fullscreen sky pass samples in SkyboxMode::Texture —
 		// behind everything at the far plane, no depth write, centred on whichever camera renders the frame.
-		void set_skybox_texture(id::id_type texture, float exposure, float rotation_radians)
+		// hdr: 0 = an 8-bit picture shown as it is; 1 = a float picture shown the classic way (gamma-encoded, clamped at white);
+		// 2 = a float picture run through the scene exposure + the tonemapper like the lit surfaces
+		void set_skybox_texture(id::id_type texture, float exposure, float rotation_radians, int hdr = 0)
 		{
-			m_sky_texture = texture; m_sky_exposure = exposure; m_sky_rotation = rotation_radians;
+			m_sky_texture = texture; m_sky_exposure = exposure; m_sky_rotation = rotation_radians; m_sky_hdr = hdr;
 		}
 		SkyboxMode get_skybox_mode() const { return m_skybox_mode; }
 		void set_skybox_colors(const DirectX::XMFLOAT3& sky, const DirectX::XMFLOAT3& horizon, const DirectX::XMFLOAT3& ground)
@@ -385,9 +390,9 @@ namespace vortex::graphics::sdlgpu
 			DirectX::XMFLOAT3 light_color; float ambient_strength;
 			u32 point_light_count; u32 spot_light_count; u32 padding1[2];
 			DirectX::XMFLOAT3 fog_color; float fog_density;
-			float fog_height_y; float fog_height_falloff; u32 fog_mode; float fog_padding;
-			float shadow_map_texel; u32 shadow_padding[3];
-			float ssao_enabled; float ssao_padding[3];
+			float fog_height_y; float fog_height_falloff; u32 fog_mode; float scene_exposure;   // pre-tonemap multiplier (0.5 = classic)
+			float shadow_map_texel; u32 tonemapper; u32 shadow_padding[2];   // tonemapper: 0 = ACES fit, 1 = PBR Neutral
+			float ssao_enabled; float ssao_padding[2]; float fog_sun_glow;   // [0..1] = AO UV scale; the sun's glow in the fog
 			// scene sky gradient for specular reflections (w = 1 when a gradient sky is active)
 			DirectX::XMFLOAT4 env_sky; DirectX::XMFLOAT4 env_horizon; DirectX::XMFLOAT4 env_ground;
 			// water refraction / screen-space reflections (#200): x = near, y = far clip of this view — @240
@@ -451,7 +456,7 @@ namespace vortex::graphics::sdlgpu
 			DirectX::XMFLOAT3 horizon_color; float padding2;
 			DirectX::XMFLOAT3 ground_color; float padding3;
 			DirectX::XMFLOAT3 sun_direction; float sun_intensity;
-			DirectX::XMFLOAT3 sun_color; float padding4;
+			DirectX::XMFLOAT3 sun_color; float tonemapper;   // the HDR path's curve: 0 = ACES fit, 1 = PBR Neutral
 			DirectX::XMFLOAT4 params;   // x: 1 = sample the equirect texture (#326), y: exposure, z: yaw offset (radians)
 		};
 		struct PostFxCB
@@ -820,6 +825,7 @@ namespace vortex::graphics::sdlgpu
 		SkyboxMode m_skybox_mode{ SkyboxMode::Gradient };
 		id::id_type m_sky_texture{ id::invalid_id };
 		float m_sky_exposure{ 1.0f };
+		int m_sky_hdr{ 0 };   // 0 = 8-bit sky, 1 = float sky shown the classic way, 2 = float sky through exposure + tonemapper
 		float m_sky_sh[27]{};
 		bool m_sky_sh_on{ false };
 		// the sky as a reflection (IBL step 2): a registry equirect with mips, bound at fragment slot 10 while valid

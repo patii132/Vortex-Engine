@@ -33,6 +33,7 @@ namespace VortexEditor.Panels.Inspector
                 "Height samples per side; changing it resamples the sculpting. 129 on 128 m = one sample per metre");
             yield return Row("LOD distance", FloatBox(() => t.LodDistance, v => { t.LodDistance = v; Touch(); }, 4, 4f, null, "0"), "Metres at which chunks drop to half the vertices (a quarter at twice that)");
             yield return Row("Collision", Bool(() => t.Collision, v => { t.Collision = v; Touch(); }), "Jolt height field + the character's collision world, and navmesh ground");
+            yield return Row("Navigation", Bool(() => t.Navigation, v => { t.Navigation = v; Touch(); }), "Count as navmesh ground (with Collision) — off for a far backdrop terrain");
             yield return Row("Data file", DataFileRow(t, entity), "The .vterrain with the heights and the splat map; saved after every stroke and with the scene");
 
             yield return Section("Layers");

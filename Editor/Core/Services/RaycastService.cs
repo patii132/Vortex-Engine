@@ -42,7 +42,9 @@ namespace Editor.Core.Services
         /// <summary>The editor view's clip planes; play mode replaces them with the main camera's (#327) and the
         /// editor view puts them back together with its FOV.</summary>
         public const float EditorNearClip = 0.1f;
-        public const float EditorFarClip = 1000.0f;
+        /// <summary>The editor view's far plane. 1000 m unless a terrain in the scene is larger: TerrainService.Submit raises it to
+        /// 1.5 × the largest terrain's size so a far backdrop terrain is drawn to its edge (and lowers it again when it goes).</summary>
+        public static float EditorFarClip { get; set; } = 1000.0f;
 
         private RaycastService() { }
 

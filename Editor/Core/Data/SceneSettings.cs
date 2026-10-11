@@ -72,6 +72,16 @@ namespace Editor.Core.Data
         [DataMember(Name = "volAmbient", Order = 79)] public float VolumetricAmbient { get; set; } = 0.35f;
         [DataMember(Name = "volSteps", Order = 80)] public int VolumetricSteps { get; set; } = 24;
         [DataMember(Name = "volShadows", Order = 81)] public bool VolumetricShadows { get; set; } = true;
+        // ---- Exposure + aerial perspective ----
+        /// <summary>Scene exposure in stops BEFORE the tonemapper (the camera's aperture): 0 = the classic look, +1 doubles the
+        /// light the ACES curve receives. Unlike the grading exposure it brightens without clipping — a sunlit desert wants +1.5…+2.5.</summary>
+        [DataMember(Name = "sceneExposure", Order = 82)] public float SceneExposure { get; set; }
+        /// <summary>The sun's forward-scatter glow in the fog when looking towards it (0 = the flat fog colour; 0.3–0.6 a desert
+        /// noon, 1–2 a low sun).</summary>
+        [DataMember(Name = "fogSunGlow", Order = 83)] public float FogSunGlow { get; set; }
+        /// <summary>0 = the ACES fit (the classic look; bright saturated colours drift towards white), 1 = Khronos PBR Neutral
+        /// (hue-preserving — a sunlit desert stays orange, a red car red).</summary>
+        [DataMember(Name = "tonemapper", Order = 84)] public int Tonemapper { get; set; }
 
         /// <summary>DataContractSerializer builds an UNINITIALIZED object (field initializers never
         /// run), so members missing from an older .vscene would deserialize as 0 — a scene saved
@@ -96,6 +106,9 @@ namespace Editor.Core.Data
         {
             DllWrapper.VortexAPI.SetFog(FogR, FogG, FogB, FogEnabled ? FogDensity : 0f,
                 FogHeightY, FogHeightFalloff);
+            DllWrapper.VortexAPI.SetSceneExposureStops(SceneExposure);
+            DllWrapper.VortexAPI.SetTonemapperMode(Tonemapper);
+            DllWrapper.VortexAPI.SetFogSunGlowStrength(FogEnabled ? FogSunGlow : 0f);
             DllWrapper.VortexAPI.SetPostVignette(VignetteEnabled, VignetteIntensity, VignetteSmoothness,
                 VignetteRoundness, VignetteR, VignetteG, VignetteB);
             DllWrapper.VortexAPI.SetPostGrain(GrainEnabled, GrainIntensity, GrainSize);

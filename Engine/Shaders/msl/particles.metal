@@ -238,9 +238,25 @@ static inline float linear_depth(constant PFrame& f, float d)
     return (n * fa) / max(fa - d * (fa - n), 1e-6);
 }
 
-static inline float3 aces(float3 color)
+static inline float3 aces(float3 color, float exposure, uint mode)
 {
-    float3 x = color * 0.5;
+    float3 x = color * (exposure > 0.0 ? exposure : 0.5);   // the surfaces' scene exposure (fog2.z)
+    if (mode == 1u)
+    {
+        // Khronos PBR Neutral (the scene's tonemapper 1): hue-preserving — see standard.metal
+        const float start_compression = 0.8 - 0.04;
+        const float desaturation = 0.15;
+        float mn = min(x.r, min(x.g, x.b));
+        float offset = mn < 0.08 ? mn - 6.25 * mn * mn : 0.04;
+        x -= offset;
+        float peak = max(x.r, max(x.g, x.b));
+        if (peak < start_compression) return saturate(x);
+        const float d = 1.0 - start_compression;
+        float new_peak = 1.0 - d * d / (peak + d - start_compression);
+        x *= new_peak / peak;
+        float g = 1.0 - 1.0 / (desaturation * (peak - new_peak) + 1.0);
+        return saturate(mix(x, float3(new_peak), g));
+    }
     float3 a = x * (x + 0.0245786) - 0.000090537;
     float3 b = x * (0.983729 * x + 0.4329510) + 0.238081;
     return saturate(a / b);
@@ -279,7 +295,7 @@ fragment float4 ParticlePS(PVOut in [[stage_in]], constant PFrame& f [[buffer(0)
     if (b.lit != 0u)
     {
         float3 lin = pow(max(c.rgb, 0.0), 2.2) * in.light;
-        c.rgb = pow(aces(lin), 1.0 / 2.2);
+        c.rgb = pow(aces(lin, f.fog2.z, f.counts.z), 1.0 / 2.2);
     }
     c.rgb *= b.emissive;
     if (b.blend == 1u) c.rgb *= (1.0 - in.fog);                      // additive glows vanish into the fog

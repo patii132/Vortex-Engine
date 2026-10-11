@@ -49,7 +49,7 @@ void main()
 	if (b.blend == 1u) { o_color = vec4(mix(vec3(1.0), c.rgb, c.a * (1.0 - fogf)), 1.0); return; }
 	if (b.blend == 2u) { o_color = vec4(c.rgb * c.a * (1.0 - fogf), 1.0); return; }
 	vec3 lin = pow(max(c.rgb, vec3(0.0)), vec3(2.2)) * decal_light(wp, n);
-	vec3 rgb = pow(aces_tonemap(lin), vec3(1.0 / 2.2));
+	vec3 rgb = pow(tonemap_scene(lin, f.fog2.z, f.counts.z), vec3(1.0 / 2.2));
 	rgb = mix(rgb, f.fog.rgb, fogf);
 	o_color = vec4(rgb, c.a);
 }

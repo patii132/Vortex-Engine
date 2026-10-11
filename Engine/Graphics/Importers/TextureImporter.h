@@ -12,6 +12,7 @@ namespace vortex::graphics
 		RG8,
 		RGB8,
 		RGBA8,
+		RGBA16F,   // a Radiance .hdr: four half floats per texel (linear radiance, not clamped)
 		Unknown
 	};
 

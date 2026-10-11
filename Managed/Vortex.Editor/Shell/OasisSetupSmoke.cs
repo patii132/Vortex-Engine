@@ -45,6 +45,8 @@ namespace VortexEditor.Shell
         const float Size = 512f;                 // metres, centred on the origin
         const int Resolution = 513;              // 1 m cells
         const float WaterLevel = -6f;            // the lakes' surface (the plain is ~0)
+        const float FarSize = 4096f;             // the far dunes: to the horizon, 8 m cells
+        const int FarResolution = 513;
         static readonly NVec3 LakeA = new NVec3(-30f, 0f, 20f);    // the west lake (bigger)
         static readonly NVec3 LakeB = new NVec3(70f, 0f, -40f);    // the east lake
         const float LakeAR = 78f, LakeBR = 64f;  // basin radii
@@ -88,7 +90,7 @@ namespace VortexEditor.Shell
                 log.Log("oasis setup: replaced the previous Oasis scene");
             }
             // the data files of a previous run go too: the foliage service would load and ADD to them
-            foreach (var rel in new[] { "Assets/Terrain/Oasis_Terrain.vterrain", "Assets/Foliage/Oasis_Vegetation.vfoliage" })
+            foreach (var rel in new[] { "Assets/Terrain/Oasis_Terrain.vterrain", "Assets/Terrain/Oasis_Far.vterrain", "Assets/Foliage/Oasis_Vegetation.vfoliage" })
             {
                 try { var f = Path.Combine(project.Path, rel); if (File.Exists(f)) File.Delete(f); } catch { }
             }
@@ -103,13 +105,13 @@ namespace VortexEditor.Shell
             TransformMath.LookAngles(new Vector3(0f, 0f, 0f), new Vector3(-toSun.X, -toSun.Y, -toSun.Z), out sunYaw, out sunPitch);
             var sun = scene.CreateEntity("Sun");
             sun.Transform.LocalRotation = new Vector3(sunPitch, sunYaw, 0f);
-            sun.AddComponentDirect(new Light(sun, LightType.Directional) { Intensity = 4.8f, ColorR = 1f, ColorG = 0.87f, ColorB = 0.68f, ShadowType = ShadowType.Soft });
+            sun.AddComponentDirect(new Light(sun, LightType.Directional) { Intensity = 5.5f, ColorR = 1f, ColorG = 0.93f, ColorB = 0.82f, ShadowType = ShadowType.Soft });
 
             // ---- the sky: the desert HDRI; the gradient colours are its environment (reflections, the lakes' sky) ----
             var sky = scene.CreateEntity("Sky");
             sky.AddComponentDirect(new Skybox(sky)
             {
-                IsEnabled = true, SkyboxType = SkyboxType.Texture, TexturePath = "Assets/Skies/goegap_2k.hdr", Exposure = 0.85f, AmbientIntensity = 0.85f,
+                IsEnabled = true, SkyboxType = SkyboxType.Texture, TexturePath = "Assets/Skies/goegap_2k.hdr", Exposure = 1.0f, AmbientIntensity = 1.0f,
                 TopColorR = 0.28f, TopColorG = 0.48f, TopColorB = 0.9f,
                 HorizonColorR = 0.82f, HorizonColorG = 0.82f, HorizonColorB = 0.8f,
                 BottomColorR = 0.62f, BottomColorG = 0.49f, BottomColorB = 0.33f
@@ -147,6 +149,37 @@ namespace VortexEditor.Shell
             TerrainService.Save(ter);
             log.Log("oasis setup: terrain " + Size + " m, " + res + " samples, heights " + data.MinHeight.ToString("0.0") + " .. " + data.MaxHeight.ToString("0.0") + " m");
 
+            // ---- the far dunes: the same ground continued to the horizon at 8 m cells, a dune sea that grows with the distance
+            // and a mountain range along the edge; it runs under the oasis terrain (1.2 m lower) so only the rim shows ----
+            var far = scene.CreateEntity("Far Dunes");
+            far.Transform.LocalPosition = new Vector3(-FarSize * 0.5f, 0f, -FarSize * 0.5f);
+            var ftc = new TerrainComponent(far)
+            {
+                Size = FarSize, Resolution = FarResolution, LodDistance = 900f, Collision = true, Navigation = false,
+                Layer0Material = "Assets/Materials/aerial_sand.vmat", Layer0Tile = 8f,
+                Layer1Material = "Assets/Materials/damp_sand.vmat", Layer1Tile = 4f,
+                Layer2Material = "Assets/Materials/rock_face_03.vmat", Layer2Tile = 9f,
+                Layer3Material = "Assets/Materials/grass_ground.vmat", Layer3Tile = 3f,
+                DataPath = "Assets/Terrain/Oasis_Far.vterrain"
+            };
+            far.AddComponentDirect(ftc);
+            TerrainData fdata2; float fcell;
+            if (!TerrainService.TryGetData(far, out fdata2, out fcell)) { log.LogError("oasis setup: no far terrain data"); return false; }
+            int fres = fdata2.Resolution;
+            for (int z = 0; z < fres; z++)
+                for (int x = 0; x < fres; x++)
+                    fdata2.Heights[z * fres + x] = FarGround(-FarSize * 0.5f + x * fcell, -FarSize * 0.5f + z * fcell);
+            fdata2.MarkChanged();
+            for (int z = 0; z < fres; z++)
+                for (int x = 0; x < fres; x++)
+                {
+                    float wx = -FarSize * 0.5f + x * fcell, wz = -FarSize * 0.5f + z * fcell;
+                    Splat(fdata2.Splat, (z * fres + x) * 4, wx, wz, fdata2.Heights[z * fres + x], fdata2.Normal(x, z, fcell).Y);
+                }
+            TerrainService.MarkDirty(far, new SampleRect { X0 = 0, Z0 = 0, X1 = fres - 1, Z1 = fres - 1 }, true, true);
+            TerrainService.Save(far);
+            log.Log("oasis setup: far dunes " + FarSize + " m, " + fres + " samples, heights " + fdata2.MinHeight.ToString("0.0") + " .. " + fdata2.MaxHeight.ToString("0.0") + " m");
+
             // ---- the lakes ----
             Lake(scene, "Oasis Lake West", LakeA, 170f);
             Lake(scene, "Oasis Lake East", LakeB, 140f);
@@ -166,6 +199,7 @@ namespace VortexEditor.Shell
                 rig.AddComponentDirect(new Script(rig, "Assets/Scripts/Player/Footprints.cs"));   // boot prints in the sand
                 rig.Transform.LocalPosition = new Vector3(24f, startY + 1.2f, -10f);
                 rig.Transform.LocalRotation = new Vector3(0f, -60f, 0f);
+                SetFarClip(rig, 6000f);   // the far dunes and the mountains are 2 km out
                 log.Log("oasis setup: the Tactical player rig stands on the strip between the lakes");
                 // the weather's dust effects travel with the player: a haze and a sandstorm emitter, off until a preset asks
                 foreach (var w in new[] { ("Weather Haze", "Assets/VFX/Dust_Haze.vfx"), ("Weather Sand", "Assets/VFX/Sandstorm.vfx") })
@@ -181,7 +215,7 @@ namespace VortexEditor.Shell
                 var camera = scene.CreateEntity("Main Camera");
                 camera.Transform.LocalPosition = new Vector3(24f, startY + 1.7f, -10f);
                 camera.Transform.LocalRotation = new Vector3(0f, -60f, 0f);
-                camera.AddComponentDirect(new Camera(camera) { IsMainCamera = true, FarClip = 2500f });
+                camera.AddComponentDirect(new Camera(camera) { IsMainCamera = true, FarClip = 6000f });
                 var playerScript = ScriptingService.EnsurePlayerController(project.Path);
                 if (!string.IsNullOrEmpty(playerScript)) camera.AddComponentDirect(new Script(camera, playerScript));
             }
@@ -210,9 +244,11 @@ namespace VortexEditor.Shell
 
             // ---- the air: warm haze that thins with height, a touch of bloom and AO, no vignette ----
             var st = scene.Settings;
-            st.FogEnabled = true; st.FogDensity = 0.0021f; st.FogHeightY = -4f; st.FogHeightFalloff = 0.025f;
-            st.FogR = 0.86f; st.FogG = 0.74f; st.FogB = 0.54f;
-            st.GradeEnabled = true; st.Exposure = 0.05f; st.Contrast = 1.06f; st.Saturation = 1.12f; st.Temperature = 0.22f; st.Tint = 0.02f;
+            st.Tonemapper = 1;         // PBR Neutral: the sand stays orange, the sky blue — the ACES fit washed both towards white
+            st.SceneExposure = 1.7f;   // stops before the tonemapper: a sunlit desert (the sand reads bright, the shadows sky-lit)
+            st.FogEnabled = true; st.FogDensity = 0.0011f; st.FogHeightY = -4f; st.FogHeightFalloff = 0.012f;
+            st.FogR = 0.40f; st.FogG = 0.43f; st.FogB = 0.50f; st.FogSunGlow = 0.45f;   // the horizon's hazy sky, warming towards the sun
+            st.GradeEnabled = true; st.Exposure = 0f; st.Contrast = 1.08f; st.Saturation = 1.15f; st.Temperature = 0.08f; st.Tint = 0.0f;
             st.AoEnabled = true; st.AoRadius = 0.8f; st.AoIntensity = 0.9f;
             st.BloomEnabled = true; st.BloomThreshold = 0.95f; st.BloomIntensity = 0.3f; st.BloomScatter = 0.6f;
             st.VolumetricEnabled = false;
@@ -257,17 +293,33 @@ namespace VortexEditor.Shell
             return h;
         }
 
+        /// <summary>The far terrain's ground: the oasis ground continued (1.2 m lower under the oasis terrain so only the rim shows),
+        /// a dune sea whose swell grows with the distance, and a broken mountain range 1.4–2 km out all around.</summary>
+        internal static float FarGround(float x, float z)
+        {
+            float inside = 1f - Smooth((Math.Max(Math.Abs(x), Math.Abs(z)) - Size * 0.5f + 30f) / 36f);   // 1 under the oasis terrain
+            float h = Ground(x, z) - 1.2f * inside;
+            float r = (float)Math.Sqrt(x * x + z * z);
+            float sea = Smooth((r - 300f) / 500f);
+            h += sea * (22f * Fbm(x * 0.0018f + 11f, z * 0.0018f + 5f, 4) + 14f * Fbm(x * 0.0007f + 2f, z * 0.0007f + 9f, 3));
+            float ridge = Smooth((r - 1250f) / 400f);   // all around: the sky picture's own hills never show above the horizon
+            float m = 1f - Math.Abs(Fbm(x * 0.0011f + 4f, z * 0.0011f + 1f, 5));          // ridged: sharp crests
+            h += ridge * (120f + 320f * m * m + 40f * Fbm(x * 0.006f, z * 0.006f, 4));
+            return h;
+        }
+
         /// <summary>Ridged dunes running SW–NE (wind from the north-west): a gentle windward side, a steep slip face, bent by
         /// noise; broad undulations and ripples on top.</summary>
         private static float Dunes(float x, float z)
         {
             float u = (x + z) * 0.7071f, v = (x - z) * 0.7071f;
             float warp = 28f * Fbm(v * 0.011f + 4f, u * 0.006f + 8f, 3);
-            float phase = (u + warp) / 58f;
+            float phase = (u + warp) / 96f;
             float f = phase - (float)Math.Floor(phase);
-            float crest = f < 0.68f ? Smooth(f / 0.68f) : 1f - Smooth((f - 0.68f) / 0.32f);
-            float amp = 9.5f + 6.5f * Fbm(x * 0.004f + 7f, z * 0.004f + 3f, 3);
-            float big = 12f * Fbm(x * 0.0055f + 3.3f, z * 0.0055f + 7.1f, 4);
+            // a long windward slope (72 % of the wavelength) and a short steep slip face: the crest reads as an edge, not a hump
+            float crest = f < 0.72f ? Smooth(f / 0.72f) : 1f - Smooth((f - 0.72f) / 0.28f);
+            float amp = 15f + 9f * Fbm(x * 0.004f + 7f, z * 0.004f + 3f, 3);
+            float big = 16f * Fbm(x * 0.0045f + 3.3f, z * 0.0045f + 7.1f, 4);
             float detail = 0.7f * Fbm(x * 0.05f, z * 0.05f, 3);
             return crest * amp + big + detail;
         }
@@ -332,8 +384,9 @@ namespace VortexEditor.Shell
             e.AddComponentDirect(new WaterComponent(e)
             {
                 Size = size, CellSize = 1f,
-                DeepR = 0.02f, DeepG = 0.20f, DeepB = 0.25f, ShallowR = 0.28f, ShallowG = 0.72f, ShallowB = 0.64f,
-                Absorption = 3f, Reflection = 0.82f, Roughness = 0.05f, WaveScale = 9f, WaveSpeed = 0.5f, WaveHeight = 0.06f, FoamWidth = 0.45f, DefaultDepth = 3f
+                // the body colours are albedos (lit by sky + sun, then exposed): the reference's dark green needs 0.03–0.15
+                DeepR = 0.006f, DeepG = 0.035f, DeepB = 0.028f, ShallowR = 0.035f, ShallowG = 0.15f, ShallowB = 0.11f,
+                Absorption = 2.5f, Reflection = 0.6f, Roughness = 0.06f, WaveScale = 9f, WaveSpeed = 0.5f, WaveHeight = 0.06f, FoamWidth = 0.45f, DefaultDepth = 3f
             });
         }
 
@@ -521,9 +574,14 @@ namespace VortexEditor.Shell
                 }
                 log.Log("oasis capture: " + FoliageService.LastInstancesDrawn + " vegetation instances drawn before the pictures (" + FoliageService.LastDrawCalls + " draws, " + waited + " waits)");
                 await SmokeRegistry.Settle(1500);
+                // the reference's aerial view: high over the dunes south-east of the oasis, the lakes in the middle distance, the
+                // dune sea and the mountains behind
+                Look(cam, At(ter, 330f, 300f, 150f), new Vector3(-10f, WaterLevel, -30f));
+                await SmokeRegistry.Settle(2500);
+                await CameraSkySmoke.Sample("oasis_aerial.bmp", 0.5, 0.5);
                 // the reference view: from the dunes east of the lakes, the sun behind the camera, both lakes and the palms ahead
                 Look(cam, At(ter, 205f, 150f, 42f), new Vector3(0f, WaterLevel - 2f, -8f));
-                await SmokeRegistry.Settle(2500);
+                await SmokeRegistry.Settle(1500);
                 await CameraSkySmoke.Sample("oasis_wide.bmp", 0.5, 0.5);
                 // at the west lake's south shore, eye height, across the water to the palms on the far bank
                 Look(cam, At(ter, -24f, -58f, 1.7f), new Vector3(-34f, WaterLevel + 0.3f, 40f));
@@ -651,6 +709,15 @@ namespace VortexEditor.Shell
             float gy; if (!TerrainService.TryHeight(ter, from.X, from.Z, out gy)) gy = target.Y;
             from.Y = Math.Max(gy + 1.6f, target.Y - height * 0.3f);
             Look(cam, from, target);
+        }
+
+        /// <summary>Every camera under <paramref name="e"/> sees at least <paramref name="far"/> metres.</summary>
+        private static void SetFarClip(GameEntity e, float far)
+        {
+            if (e == null) return;
+            var cam = e.GetComponent<Camera>();
+            if (cam != null && cam.FarClip < far) cam.FarClip = far;
+            if (e.Children != null) foreach (var c in e.Children) SetFarClip(c, far);
         }
 
         private static Vector3 At(GameEntity ter, float x, float z, float above)

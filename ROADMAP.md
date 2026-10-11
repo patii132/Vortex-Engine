@@ -1,4 +1,4 @@
-# Vortex Engine — Roadmap (updated 2026-10-06)
+# Vortex Engine — Roadmap (updated 2026-10-11)
 
 **The plan lives in the [GitHub milestones](https://github.com/shadow-kernel/Vortex-Engine/milestones).** This file summarises them;
 the pinned issue #188 mirrors it.
@@ -23,11 +23,11 @@ Status legend: ✅ shipped on `main` · 🟡 partial · ⬜ open. Issue numbers 
 | v3.3.0 | VFX — released 2026-10-10 | ✅ | the particle system on DirectX 12 + VFX editor, trails/beams, soft particles and collision (#117 #118 #121 #122), decals (#120), volumetric fog with light shafts (#119), weapon VFX (#178) for every camera (#194), the playable feature tour in the Tactical Shooter's Range |
 | v3.4.0 | World | ✅ | terrain (#124), foliage (#125), water (#200, surfaces — buoyancy / swim / refraction stay open), the Texture-sky environment, weather as a game script, the **Open World template** (the desert oasis, the infected), environment MCP tools, the asset-pipeline tools |
 | v3.4.5 | Streaming | ⬜ | foliage impostors (#199), splines (#202), HZB culling (#127), world partition (#197) + HLOD (#198), **texture streaming (#195)**, streaming-ready paks (#196), BCn compression (#179), async streaming (#128) |
-| v3.5.0 | Multiplayer I: Netcode | ⬜ | design doc (#204), transport, headless dedicated server, tick + clock sync, replication, `[Replicated]`/RPC API, prediction, interpolation, hitboxes, lag compensation, interest management, netgraph, multiplayer play mode, replays, load tests, 8-player Tactical deathmatch (#145, #204–#219) |
-| v3.6.0 | Animation v2 & Characters | ⬜ | state machine + blend trees (#146), blend spaces + aim offsets, retargeting (#148), turn-in-place, animation LOD for 64 characters, FP/TP weapon events, clip compression, character shading, operators (#220–#227, #142, #185) |
-| v3.7.0 | Shooter Framework | ⬜ | `.vweapon` assets, attachments + camos, ballistics, damage + armor plates, downed/revive, inventory + loot, throwables, HUD toolkit, input actions + gamepad + aim assist, settings, first-person body shadow, shooter audio (#228–#242, #166) |
-| v3.8.0 | Multiplayer II: Online Services | ⬜ | platform layer (Steam first, #159), relay + auth, parties, matchmaking with bot backfill, server hosting, voice chat, persistence, anti-cheat foundations (#243–#253) |
-| v3.9.0 | AAA Rendering: Look & Lighting | ⬜ | TAA (#141) + FSR/MetalFX/DLSS + dynamic resolution, physical sky + time of day, dynamic GI, SSR (#155) + probes (#167), exposure + grading, DoF/motion blur (#168), HDR (#156), scopes, pipeline precompilation (#254–#262) |
+| v3.5.0 | AAA Rendering: Look & Lighting | 🟡 | **moved before multiplayer (2026-10-11: the look first)** — scene exposure + selectable tonemapper (ACES / PBR Neutral), HDR sky through the tonemapper, aerial perspective (v3.4.3 ✅); next: dynamic GI (#257, the "Lumen" item: probe-based with ray-traced / raster-captured updates), TAA (#141) + FSR/MetalFX/DLSS + dynamic resolution, physical sky + time of day, dynamic GI, SSR (#155) + probes (#167), exposure + grading, DoF/motion blur (#168), HDR (#156), scopes, pipeline precompilation (#254–#262) |
+| v3.6.0 | Multiplayer I: Netcode | ⬜ | design doc (#204), transport, headless dedicated server, tick + clock sync, replication, `[Replicated]`/RPC API, prediction, interpolation, hitboxes, lag compensation, interest management, netgraph, multiplayer play mode, replays, load tests, 8-player Tactical deathmatch (#145, #204–#219) |
+| v3.7.0 | Animation v2 & Characters | ⬜ | state machine + blend trees (#146), blend spaces + aim offsets, retargeting (#148), turn-in-place, animation LOD for 64 characters, FP/TP weapon events, clip compression, character shading, operators (#220–#227, #142, #185) |
+| v3.8.0 | Shooter Framework | ⬜ | `.vweapon` assets, attachments + camos, ballistics, damage + armor plates, downed/revive, inventory + loot, throwables, HUD toolkit, input actions + gamepad + aim assist, settings, first-person body shadow, shooter audio (#228–#242, #166) |
+| v3.9.0 | Multiplayer II: Online Services | ⬜ | platform layer (Steam first, #159), relay + auth, parties, matchmaking with bot backfill, server hosting, voice chat, persistence, anti-cheat foundations (#243–#253) |
 | v4.0.0 | XXL: 10x Performance | ⬜ | render graph, bindless, GPU culling + indirect draws, mesh shaders, job system, ECS core, frame allocators, async compute, profiler, benchmark CI (#131–#144) |
 | v4.1.0 | Production & LiveOps | ⬜ | nightlies (#160), crash reports for games + servers, telemetry, delta patches, localization (#150) + typography (#149), accessibility, server deploy pipeline, console v2 (#163) (#263–#268) |
 | v4.2.0 | Battle Royale Systems | ⬜ | vehicles, drop plane + freefall + parachute, zone, loot distribution, airdrops, match flow, squads + spectating, traversal, open-world navmesh, BR bots (#269–#279) |
@@ -41,13 +41,18 @@ original-quality downloads (#289).
 "v2.8.0 – Global Asset Database" is v2.9.0 and the Asset Store moved to v2.10.0.
 
 ## Now
-1. **v3.0.4** — a **Terminal** tab (Ctrl+`), the sidebar no longer pushes the Inspector over the viewport toolbar, and
-   the documentation lives only on the website. (v3.0.3: the Claude sidebar.) Then the checks on a real Windows PC
-   (#315): the in-app update from v2.10, the editor on a DX12 GPU, an exported game.
-2. **Follow-ups** — the in-app update's elevated restart (#312), shadow settings (#304), the DLSS runtime in release builds
-   (#305), Linux CI (#306), `Lighting.SetDirectional` (#307), the Steam Audio runtime (#308), a Kenney manifest (#314).
-3. **v3.1.0 — Physics v2** — Jolt in the Visual Studio build (#182), the player on CharacterVirtual (#105, #187), debug
-   draw (#106), compound colliders (#107); the classic WPF editor retired (#311, done).
+1. **The look first (user decision, 2026-10-11): the rendering is finished before multiplayer starts.** v3.4.3 brings the
+   exposure pipeline (scene exposure in stops before the tonemapper, ACES / Khronos PBR Neutral per scene, the HDR sky
+   through the same curve, the sun's glow in the fog) and the oasis to the horizon (4 km far dunes, mountains, a
+   seamless 1024-texel terrain atlas). Next in **v3.5.0 — AAA Rendering**: dynamic GI (#257 — the "Lumen" item:
+   probe volumes with ray-traced updates where the GPU can, raster captures elsewhere), TAA (#141) + upscaling (#255),
+   large-world shadows (#201), physical sky (#256), auto-exposure + LUTs (#258).
+2. **v3.4.5 — Streaming** stays the performance half: impostors (#199), HLOD (#198), texture streaming (#195),
+   BCn (#179), world partition (#197).
+3. **Stability:** every crash is a bug. The editor logs fatal errors with the last console lines
+   (`<appdata>/VortexEngine/logs/editor-errors.log`), a native crash on Windows writes `crash-<time>.dmp` + `.txt`
+   next to it, a lost DX12 device is named in the log, and a broken MCP tool is skipped instead of ending the editor.
+   Send those files with every crash report.
 
 ## Shipped
 

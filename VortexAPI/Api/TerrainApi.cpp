@@ -61,7 +61,7 @@ EDITOR_INTERFACE int32_t DecodeImageMemory(const unsigned char* data, int32_t le
 {
 	if (!data || length <= 0) return 0;
 	graphics::ImageData image = graphics::TextureImporter::import_from_memory(reinterpret_cast<const u8*>(data), (u64)length);
-	if (!image.is_valid()) return 0;
+	if (!image.is_valid() || image.format == graphics::ImageFormat::RGBA16F) return 0;   // 8-bit pictures only here
 	const int32_t w = (int32_t)image.width, h = (int32_t)image.height;
 	const int64_t needed64 = (int64_t)w * (int64_t)h * 4;
 	if (needed64 <= 0 || needed64 > 0x7fffffff) return 0;

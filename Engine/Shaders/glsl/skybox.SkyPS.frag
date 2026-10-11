@@ -21,7 +21,14 @@ void main()
 		const float two_pi = 6.28318530718;
 		float u = atan(dir.x, dir.z) / two_pi + 0.5 + c.params.z / two_pi;
 		float v = acos(clamp(y, -1.0, 1.0)) / 3.14159265359;
-		o_color = vec4(textureLod(u_sky, vec2(u, v), 0.0).rgb * c.params.y, 1.0);
+		vec3 sky = textureLod(u_sky, vec2(u, v), 0.0).rgb * c.params.y;
+		if (c.params.w < 0.0) sky = pow(saturate(sky), vec3(1.0 / 2.2));   // a float picture the classic way: gamma-encoded, clamped
+		else if (c.params.w > 0.0)
+		{
+			// an HDR picture: the scene exposure + ACES + gamma of the lit surfaces, so the sky and the world agree
+			sky = pow(tonemap_scene(sky, c.params.w, c.tonemapper > 0.5 ? 1u : 0u), vec3(1.0 / 2.2));
+		}
+		o_color = vec4(sky, 1.0);
 		return;
 	}
 	vec3 color;

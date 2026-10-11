@@ -765,6 +765,7 @@ namespace vortex::graphics::dx12
 		DX12Particles::Environment e{};
 		e.fog_color = f.fog_color; e.fog_density = f.fog_density;
 		e.fog_height_y = f.fog_height_y; e.fog_height_falloff = f.fog_height_falloff;
+		e.scene_exposure = f.scene_exposure > 0.0f ? f.scene_exposure : 0.5f; e.fog_sun_glow = f.fog_sun_glow; e.tonemapper = f.tonemapper;
 		e.sun_direction = f.light_direction; e.sun_intensity = f.directional_intensity;
 		e.sun_color = f.light_color; e.ambient = f.ambient_strength;
 		e.point_lights = (std::min)(f.point_light_count, (u32)MAX_POINT_LIGHTS);

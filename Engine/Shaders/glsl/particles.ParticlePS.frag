@@ -53,7 +53,7 @@ void main()
 	if (b.lit != 0u)
 	{
 		vec3 lin = pow(max(c.rgb, 0.0), vec3(2.2)) * v_light;
-		c.rgb = pow(aces_tonemap(lin), vec3(1.0 / 2.2));
+		c.rgb = pow(tonemap_scene(lin, f.fog2.z, f.counts.z), vec3(1.0 / 2.2));
 	}
 	c.rgb *= b.emissive;
 	if (b.blend == 1u) c.rgb *= (1.0 - v_fog);                        // additive glows vanish into the fog

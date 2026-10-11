@@ -26,11 +26,13 @@ struct PerFrame
     float fog_height_y;
     float fog_height_falloff;
     uint fog_mode;
-    float fog_padding;
+    float scene_exposure;              // @156  pre-tonemap multiplier (0.5 = classic; <= 0 reads as 0.5)
     float shadow_map_texel;
-    uint shadow_padding[3];
+    uint tonemapper;                   // @164  0 = ACES fit, 1 = PBR Neutral
+    uint shadow_padding[2];
     float ssao_enabled;
-    float ssao_padding[3];
+    float ssao_padding[2];             // the AO UV scale
+    float fog_sun_glow;                // @188  the sun's glow in the fog (0 = off)
     float4 env_sky;
     float4 env_horizon;
     float4 env_ground;
@@ -134,12 +136,51 @@ static inline float fog_optical_depth(float density, float height_y, float k, fl
     return density * (below + above * mean);
 }
 
+// The scene's tonemapper (frame.tonemapper): 0 = the ACES fit (classic, pulls bright saturated colours towards white);
+// 1 = Khronos PBR Neutral (hue-preserving with a gentle highlight desaturation). Input = the EXPOSED scene colour.
+static inline float3 tonemap_neutral(float3 color)
+{
+    const float start_compression = 0.8 - 0.04;
+    const float desaturation = 0.15;
+    float x = min(color.r, min(color.g, color.b));
+    float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+    color -= offset;
+    float peak = max(color.r, max(color.g, color.b));
+    if (peak < start_compression) return color;
+    const float d = 1.0 - start_compression;
+    float new_peak = 1.0 - d * d / (peak + d - start_compression);
+    color *= new_peak / peak;
+    float g = 1.0 - 1.0 / (desaturation * (peak - new_peak) + 1.0);
+    return mix(color, float3(new_peak), g);
+}
+static inline float3 tonemap_scene(float3 x, uint mode)
+{
+    if (mode == 1u) return saturate(tonemap_neutral(max(x, 0.0)));
+    float3 a = x * (x + 0.0245786) - 0.000090537;
+    float3 b = x * (0.983729 * x + 0.4329510) + 0.238081;
+    return saturate(a / b);
+}
+
+// Aerial perspective: the flat fog colour plus the sun's forward-scatter glow when looking towards it (fog_sun_glow 0 = off).
+static inline float3 fog_inscatter(constant PerFrame& frame, float3 world_pos)
+{
+    float3 c = float3(frame.fog_color);
+    if (frame.fog_sun_glow > 0.0 && frame.directional_intensity > 0.001)
+    {
+        float3 V = normalize(world_pos - float3(frame.camera_position));
+        float mu = saturate(dot(V, normalize(-float3(frame.light_direction))));
+        float phase = 0.12 * mu * mu + 0.88 * pow(mu, 10.0);
+        c += float3(frame.light_color) * (frame.fog_sun_glow * phase);
+    }
+    return c;
+}
+
 static inline float3 apply_fog(constant PerFrame& frame, float3 color, float3 world_pos)
 {
     if (frame.fog_density <= 0.0) return color;
     float optical = fog_optical_depth(frame.fog_density, frame.fog_height_y, frame.fog_height_falloff, float3(frame.camera_position), world_pos);
     float f = 1.0 - exp2(-optical);
-    return mix(color, float3(frame.fog_color), saturate(f));
+    return mix(color, fog_inscatter(frame, world_pos), saturate(f));
 }
 
 static inline float sample_cascade_shadow(constant PerFrame& frame, constant LightBuffer& lights, depth2d<float> atlas, sampler smp, float3 wp)
@@ -351,10 +392,7 @@ fragment float4 PSMain(VSOut in [[stage_in]],
     alpha = max(alpha, foam * 0.95 * saturate(depth / 0.08));
 
     color = apply_fog(frame, color, in.world_pos);
-    float3 x = color * 0.5;
-    float3 a = x * (x + 0.0245786) - 0.000090537;
-    float3 b = x * (0.983729 * x + 0.4329510) + 0.238081;
-    color = saturate(a / b);
+    color = tonemap_scene(color * (frame.scene_exposure > 0.0 ? frame.scene_exposure : 0.5), frame.tonemapper);   // the scene exposure, then the curve
     color = pow(max(color, 0.0), 1.0 / 2.2);
     if (have_scene)
     {

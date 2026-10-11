@@ -23,6 +23,42 @@ vec3   saturate(vec3  x) { return clamp(x, vec3(0.0), vec3(1.0)); }
 vec4   saturate(vec4  x) { return clamp(x, vec4(0.0), vec4(1.0)); }
 
 // ACES filmic (RRT+ODT fit) — byte-identical math to the .metal twins.
+// Khronos PBR Neutral: hue-preserving with a gentle highlight desaturation (the scene's tonemapper 1). Input = the
+// EXPOSED scene colour.
+vec3 tonemap_neutral(vec3 color)
+{
+	const float start_compression = 0.8 - 0.04;
+	const float desaturation = 0.15;
+	float x = min(color.r, min(color.g, color.b));
+	float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+	color -= offset;
+	float peak = max(color.r, max(color.g, color.b));
+	if (peak < start_compression) return color;
+	const float d = 1.0 - start_compression;
+	float new_peak = 1.0 - d * d / (peak + d - start_compression);
+	color *= new_peak / peak;
+	float g = 1.0 - 1.0 / (desaturation * (peak - new_peak) + 1.0);
+	return mix(color, vec3(new_peak), g);
+}
+
+// The scene's tonemapper after the scene exposure: 0 = the ACES fit (classic), 1 = PBR Neutral.
+vec3 tonemap_scene(vec3 color, float exposure, uint mode)
+{
+	vec3 x = color * (exposure > 0.0 ? exposure : 0.5);
+	if (mode == 1u) return saturate(tonemap_neutral(max(x, 0.0)));
+	vec3 a = x * (x + 0.0245786) - 0.000090537;
+	vec3 b = x * (0.983729 * x + 0.4329510) + 0.238081;
+	return saturate(a / b);
+}
+
+vec3 aces_tonemap_exposed(vec3 color, float exposure)
+{
+	vec3 x = color * (exposure > 0.0 ? exposure : 0.5);   // the scene exposure (camera aperture)
+	vec3 a = x * (x + 0.0245786) - 0.000090537;
+	vec3 b = x * (0.983729 * x + 0.4329510) + 0.238081;
+	return saturate(a / b);
+}
+
 vec3 aces_tonemap(vec3 color)
 {
 	vec3 x = color * 0.5;

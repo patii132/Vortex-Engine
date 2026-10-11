@@ -136,12 +136,26 @@ float fog_optical_depth(float density, float height_y, float k, vec3 cam, vec3 w
 	return density * (below + above * mean_density);
 }
 
+// Aerial perspective: the flat fog colour plus the sun's forward-scatter glow when looking towards it (fog_sun_glow 0 = off).
+vec3 fog_inscatter(vec3 world_pos)
+{
+	vec3 c = frame.fog_color;
+	if (frame.fog_sun_glow > 0.0 && frame.directional_intensity > 0.001)
+	{
+		vec3 V = normalize(world_pos - frame.camera_position);
+		float mu = saturate(dot(V, normalize(-frame.light_direction)));
+		float phase = 0.12 * mu * mu + 0.88 * pow(mu, 10.0);
+		c += frame.light_color * (frame.fog_sun_glow * phase);
+	}
+	return c;
+}
+
 vec3 apply_fog(vec3 color, vec3 world_pos)
 {
 	if (frame.fog_density <= 0.0) return color;
 	float optical = fog_optical_depth(frame.fog_density, frame.fog_height_y, frame.fog_height_falloff, frame.camera_position, world_pos);
 	float f = 1.0 - exp2(-optical);
-	return mix(color, frame.fog_color, saturate(f));
+	return mix(color, fog_inscatter(world_pos), saturate(f));
 }
 
 // ---- shadow sampling (byte-matched to standard.hlsl / standard.metal: spot atlas 2x2 tiles, cascade atlas
@@ -463,7 +477,7 @@ void main()
 	vec3 color = ambient + Lo;
 	color = apply_fog(color, v_world_pos);
 
-	color = aces_tonemap(color);
+	color = tonemap_scene(color, frame.scene_exposure, frame.tonemapper);
 	color = pow(max(color, 0.0), vec3(1.0 / 2.2));
 	o_color = vec4(color, alpha);
 }

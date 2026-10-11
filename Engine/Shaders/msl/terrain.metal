@@ -30,11 +30,13 @@ struct PerFrame
     float fog_height_y;
     float fog_height_falloff;
     uint fog_mode;
-    float fog_padding;
+    float scene_exposure;              // @156  pre-tonemap multiplier (0.5 = classic; <= 0 reads as 0.5)
     float shadow_map_texel;
-    uint shadow_padding[3];
+    uint tonemapper;                   // @164  0 = ACES fit, 1 = PBR Neutral
+    uint shadow_padding[2];
     float ssao_enabled;
-    float ssao_padding[3];
+    float ssao_padding[2];             // the AO UV scale
+    float fog_sun_glow;                // @188  the sun's glow in the fog (0 = off)
     float4 env_sky;
     float4 env_horizon;
     float4 env_ground;
@@ -155,12 +157,51 @@ static inline float fog_optical_depth(float density, float height_y, float k, fl
     return density * (below + above * mean);
 }
 
+// The scene's tonemapper (frame.tonemapper): 0 = the ACES fit (classic, pulls bright saturated colours towards white);
+// 1 = Khronos PBR Neutral (hue-preserving with a gentle highlight desaturation). Input = the EXPOSED scene colour.
+static inline float3 tonemap_neutral(float3 color)
+{
+    const float start_compression = 0.8 - 0.04;
+    const float desaturation = 0.15;
+    float x = min(color.r, min(color.g, color.b));
+    float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+    color -= offset;
+    float peak = max(color.r, max(color.g, color.b));
+    if (peak < start_compression) return color;
+    const float d = 1.0 - start_compression;
+    float new_peak = 1.0 - d * d / (peak + d - start_compression);
+    color *= new_peak / peak;
+    float g = 1.0 - 1.0 / (desaturation * (peak - new_peak) + 1.0);
+    return mix(color, float3(new_peak), g);
+}
+static inline float3 tonemap_scene(float3 x, uint mode)
+{
+    if (mode == 1u) return saturate(tonemap_neutral(max(x, 0.0)));
+    float3 a = x * (x + 0.0245786) - 0.000090537;
+    float3 b = x * (0.983729 * x + 0.4329510) + 0.238081;
+    return saturate(a / b);
+}
+
+// Aerial perspective: the flat fog colour plus the sun's forward-scatter glow when looking towards it (fog_sun_glow 0 = off).
+static inline float3 fog_inscatter(constant PerFrame& frame, float3 world_pos)
+{
+    float3 c = float3(frame.fog_color);
+    if (frame.fog_sun_glow > 0.0 && frame.directional_intensity > 0.001)
+    {
+        float3 V = normalize(world_pos - float3(frame.camera_position));
+        float mu = saturate(dot(V, normalize(-float3(frame.light_direction))));
+        float phase = 0.12 * mu * mu + 0.88 * pow(mu, 10.0);
+        c += float3(frame.light_color) * (frame.fog_sun_glow * phase);
+    }
+    return c;
+}
+
 static inline float3 apply_fog(constant PerFrame& frame, float3 color, float3 world_pos)
 {
     if (frame.fog_density <= 0.0) return color;
     float optical = fog_optical_depth(frame.fog_density, frame.fog_height_y, frame.fog_height_falloff, float3(frame.camera_position), world_pos);
     float f = 1.0 - exp2(-optical);
-    return mix(color, float3(frame.fog_color), saturate(f));
+    return mix(color, fog_inscatter(frame, world_pos), saturate(f));
 }
 
 static inline float d_ggx(float NdotH, float roughness)
@@ -277,14 +318,14 @@ static inline float sample_point_shadow(constant LightBuffer& lights, depth2d<fl
 // ---------------------------------------------------------------- splat layers (see terrain.hlsl)
 static inline float2 atlas_uv(float2 uv, int layer)
 {
-    const float pad = 1.0 / 128.0;
+    const float pad = 1.0 / 32.0;    // the atlas builder wraps the texture into this gutter: seamless up to the mip cap
     float2 q = float2((float)(layer & 1), (float)(layer >> 1));
     return (q + pad + fract(uv) * (1.0 - 2.0 * pad)) * 0.5;
 }
 
 static inline void clamp_grad(thread float2& dx, thread float2& dy)
 {
-    const float max_g = 1.0 / 16.0;
+    const float max_g = 1.0 / 32.0;   // never a mip whose gutter is under half a texel
     float gl = max(length(dx), length(dy));
     if (gl > max_g) { float s = max_g / gl; dx *= s; dy *= s; }
 }
@@ -363,7 +404,10 @@ fragment float4 PSMain(VSOut in [[stage_in]],
     float3 nm = float3(0.0);
     float rough = 0.0;
     // detail: the layer's own normal map again at 7.3x finer tiling, fading out beyond ~28 m — close-up ripples and grain
-    float detail_w = saturate(1.0 - length(float3(frame.camera_position) - in.world_pos) / 28.0);
+    float cam_dist = length(float3(frame.camera_position) - in.world_pos);
+    float detail_w = saturate(1.0 - cam_dist / 28.0);
+    // far: beyond ~250 m blend to the layer's mean colour (the 2x2 mip = one texel per quadrant) and a flat normal
+    float far_w = saturate((cam_dist - 120.0) / 480.0);
     for (int i = 0; i < 4; ++i)
     {
         float wi = w[i];
@@ -372,8 +416,15 @@ fragment float4 PSMain(VSOut in [[stage_in]],
         float2 a = atlas_uv(uv, i);
         float2 dx = dpx * tiles_per_metre[i] * 0.5, dy = dpy * tiles_per_metre[i] * 0.5;
         clamp_grad(dx, dy);
-        albedo += wi * (obj.has_albedo_texture != 0 ? srgb_to_linear(albedo_tex.sample(albedo_smp, a, gradient2d(dx, dy)).rgb) : float3(0.5));
-        if (obj.has_normal_texture != 0) nm += wi * (normal_tex.sample(normal_smp, a, gradient2d(dx, dy)).rgb * 2.0 - 1.0);
+        // the same layer at a 4.3x larger, offset tiling blended in half: the two periods never line up (see terrain.hlsl)
+        float2 aM = atlas_uv(uv * 0.23 + float2(0.21, 0.63), i);
+        float2 dxM = dx * 0.23, dyM = dy * 0.23;
+        clamp_grad(dxM, dyM);
+        if (obj.has_albedo_texture != 0)
+            albedo += wi * mix(srgb_to_linear(albedo_tex.sample(albedo_smp, a, gradient2d(dx, dy)).rgb), srgb_to_linear(albedo_tex.sample(albedo_smp, aM, gradient2d(dxM, dyM)).rgb), 0.5);
+        else albedo += wi * float3(0.5);
+        if (obj.has_normal_texture != 0)
+            nm += wi * mix(normal_tex.sample(normal_smp, a, gradient2d(dx, dy)).rgb * 2.0 - 1.0, normal_tex.sample(normal_smp, aM, gradient2d(dxM, dyM)).rgb * 2.0 - 1.0, 0.5);
         if (obj.has_normal_texture != 0 && detail_w > 0.001)
         {
             float2 ad = atlas_uv(uv * 7.3 + 0.37, i);
@@ -383,6 +434,16 @@ fragment float4 PSMain(VSOut in [[stage_in]],
             nm += wi * detail_w * 0.6 * float3(nd.xy, 0.0);
         }
         if (obj.has_roughness_texture != 0) rough += wi * roughness_tex.sample(roughness_smp, a, gradient2d(dx, dy)).r;
+    }
+    if (far_w > 0.001 && obj.has_albedo_texture != 0)
+    {
+        float amips = (float)albedo_tex.get_num_mip_levels();
+        float3 mean = float3(0.0);
+        for (int k = 0; k < 4; ++k)
+            if (w[k] > 0.002)
+                mean += w[k] * srgb_to_linear(albedo_tex.sample(albedo_smp, float2((float)(k & 1) + 0.5, (float)(k >> 1) + 0.5) * 0.5, level(max(amips - 2.0, 0.0))).rgb);
+        albedo = mix(albedo, mean, far_w);
+        nm *= 1.0 - far_w;
     }
     albedo *= in.tint.rgb;
     albedo *= macro_variation(in.world_pos.xz);
@@ -519,10 +580,7 @@ fragment float4 PSMain(VSOut in [[stage_in]],
     float3 color = ambient + Lo;
     color = apply_fog(frame, color, in.world_pos);
 
-    float3 x = color * 0.5;
-    float3 a = x * (x + 0.0245786) - 0.000090537;
-    float3 b = x * (0.983729 * x + 0.4329510) + 0.238081;
-    color = saturate(a / b);
+    color = tonemap_scene(color * (frame.scene_exposure > 0.0 ? frame.scene_exposure : 0.5), frame.tonemapper);   // the scene exposure, then the curve
     color = pow(max(color, 0.0), 1.0 / 2.2);
     return float4(color, 1.0);
 }

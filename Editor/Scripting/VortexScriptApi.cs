@@ -1972,6 +1972,16 @@ namespace Vortex
         /// <summary>Turn fog off.</summary>
         public static void ClearFog() { Editor.DllWrapper.VortexAPI.SetFog(0f, 0f, 0f, 0f, 0f, 0f); }
 
+        /// <summary>Scene exposure in stops BEFORE the tonemapper — the camera's aperture. 0 = the scene's classic look, +1
+        /// doubles the light the ACES curve receives (a sunlit desert: +1.5 … +2.5, a night: −1). Unlike the LDR grading
+        /// exposure it brightens without clipping; the HDR sky follows it. Stays until changed (the scene settings
+        /// re-apply on Stop).</summary>
+        public static void SetExposure(float stops) { Editor.DllWrapper.VortexAPI.SetSceneExposureStops(stops); }
+
+        /// <summary>Aerial perspective: the sun's forward-scatter glow in the fog when looking towards it — the haze brightens and
+        /// warms around the sun. 0 = the flat fog colour, 0.3–0.6 a desert noon, 1–2 a low sun.</summary>
+        public static void SetFogSunGlow(float glow) { Editor.DllWrapper.VortexAPI.SetFogSunGlowStrength(glow); }
+
         /// <summary>Volumetric fog (#119): the air itself scatters light towards the camera — the flashlight becomes a visible
         /// cone, point lights glow, the sun throws shafts, all stopped by the shadow maps. <paramref name="density"/> scales the
         /// scattering (the height profile and colour come from <see cref="SetFog"/>, which may stay at density 0),

@@ -185,10 +185,10 @@ namespace vortex::graphics::dx12
 		f.screen[0] = (float)w; f.screen[1] = (float)h; f.screen[2] = 1.0f / (float)w; f.screen[3] = 1.0f / (float)h;
 		f.depth_params[0] = view.near_clip; f.depth_params[1] = view.far_clip; f.depth_params[2] = view.ortho ? 1.0f : 0.0f;
 		f.fog[0] = env.fog_color.x; f.fog[1] = env.fog_color.y; f.fog[2] = env.fog_color.z; f.fog[3] = env.fog_density;
-		f.fog2[0] = env.fog_height_y; f.fog2[1] = env.fog_height_falloff;
+		f.fog2[0] = env.fog_height_y; f.fog2[1] = env.fog_height_falloff; f.fog2[2] = env.scene_exposure; f.fog2[3] = env.fog_sun_glow;
 		f.sun_dir[0] = env.sun_direction.x; f.sun_dir[1] = env.sun_direction.y; f.sun_dir[2] = env.sun_direction.z; f.sun_dir[3] = env.sun_intensity;
 		f.sun_color[0] = env.sun_color.x; f.sun_color[1] = env.sun_color.y; f.sun_color[2] = env.sun_color.z; f.sun_color[3] = env.ambient;
-		f.counts[0] = lights ? env.point_lights : 0; f.counts[1] = lights ? env.spot_lights : 0;
+		f.counts[0] = lights ? env.point_lights : 0; f.counts[1] = lights ? env.spot_lights : 0; f.counts[2] = env.tonemapper;
 		DX12FrameRing::Upload fcb = m_ring->alloc(sizeof(DFrame));
 		if (!fcb.cpu) return;
 		std::memcpy(fcb.cpu, &f, sizeof(f));

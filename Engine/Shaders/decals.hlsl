@@ -18,10 +18,10 @@ cbuffer DFrame : register(b0)
     float4 screen;                            // @144 w, h, 1/w, 1/h
     float4 depth_params;                      // @160 x near, y far, z ortho
     float4 fog;                               // @176 rgb, density
-    float4 fog2;                              // @192 height_y, height_falloff
+    float4 fog2;                              // @192 height_y, height_falloff, z = scene exposure, w = fog sun glow
     float4 sun_dir;                           // @208 xyz = direction the light travels, w = intensity
     float4 sun_color;                         // @224 rgb, w = ambient strength
-    uint4  counts;                            // @240 x = point lights, y = spot lights
+    uint4  counts;                            // @240 x = point lights, y = spot lights, z = tonemapper
 };                                            // = 256
 
 cbuffer DBatch : register(b1)
@@ -175,7 +175,23 @@ float3 decal_light(float3 wp, float3 n)
 
 float3 aces_tonemap(float3 color)
 {
-    float3 x = color * 0.5;
+    float3 x = color * (fog2.z > 0.0 ? fog2.z : 0.5);   // the scene exposure the surfaces use
+    if (counts.z == 1)
+    {
+        // Khronos PBR Neutral (the scene's tonemapper 1): hue-preserving — see standard.hlsl
+        const float startCompression = 0.8 - 0.04;
+        const float desaturation = 0.15;
+        float mn = min(x.r, min(x.g, x.b));
+        float offset = mn < 0.08 ? mn - 6.25 * mn * mn : 0.04;
+        x -= offset;
+        float peak = max(x.r, max(x.g, x.b));
+        if (peak < startCompression) return saturate(x);
+        const float d = 1.0 - startCompression;
+        float newPeak = 1.0 - d * d / (peak + d - startCompression);
+        x *= newPeak / peak;
+        float g = 1.0 - 1.0 / (desaturation * (peak - newPeak) + 1.0);
+        return saturate(lerp(x, newPeak * float3(1.0, 1.0, 1.0), g));
+    }
     float3 a = x * (x + 0.0245786) - 0.000090537;
     float3 b = x * (0.983729 * x + 0.4329510) + 0.238081;
     return saturate(a / b);

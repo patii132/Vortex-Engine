@@ -32,9 +32,11 @@ namespace vortex::graphics::dx12
 		void set_sun(const DirectX::XMFLOAT3& direction, const DirectX::XMFLOAT3& color, float intensity);
 
 		// Equirect texture sky (#326): mode 1 samples the texture bound at root parameter 1 (t0).
-		void set_texture_params(float mode, float exposure, float rotation_radians)
+		void set_texture_params(float mode, float exposure, float rotation_radians, float tonemap_exposure = 0.0f, float tonemapper = 0.0f)
 		{
-			m_constants.params = { mode, exposure, rotation_radians, 0.0f };
+			m_constants.tonemapper = tonemapper;
+			// w > 0: an HDR sky — the shader applies this scene exposure + ACES + gamma like the lit surfaces
+			m_constants.params = { mode, exposure, rotation_radians, tonemap_exposure };
 		}
 		
 		// Get constant buffer data
@@ -65,7 +67,7 @@ namespace vortex::graphics::dx12
 			DirectX::XMFLOAT3 sun_direction;
 			float sun_intensity;
 			DirectX::XMFLOAT3 sun_color;
-			float padding4;
+			float tonemapper;   // the HDR path's curve: 0 = ACES fit, 1 = PBR Neutral
 			DirectX::XMFLOAT4 params;   // x: 1 = sample the equirect texture at t0 (#326), y: exposure, z: yaw offset (radians)
 		};
 

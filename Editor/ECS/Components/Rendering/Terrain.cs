@@ -20,6 +20,7 @@ namespace Editor.ECS.Components.Rendering
         private int _resolution = DefaultResolution;
         private float _lodDistance = 48f;
         private bool _collision = true;
+        private bool _navigation = true;
         private string _layer0Material, _layer1Material, _layer2Material, _layer3Material;
         private float _layer0Tile = 4f, _layer1Tile = 4f, _layer2Tile = 4f, _layer3Tile = 4f;
 
@@ -70,6 +71,15 @@ namespace Editor.ECS.Components.Rendering
         {
             get => _collision;
             set => SetProperty(ref _collision, value, nameof(Collision));
+        }
+
+        /// <summary>Count as navmesh ground (with Collision). Off for a far-distance terrain that only dresses the horizon — a
+        /// 4 km backdrop would blow the navmesh's tile budget.</summary>
+        [DataMember(Name = "navigation", Order = 15)]
+        public bool Navigation
+        {
+            get => _navigation;
+            set => SetProperty(ref _navigation, value, nameof(Navigation));
         }
 
         // ---- layers: a .vmat per layer (albedo / normal / roughness maps + base colour) and its tiling in metres ----

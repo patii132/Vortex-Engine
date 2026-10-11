@@ -10,7 +10,7 @@ struct SkyboxConstants
     packed_float3 horizon_color;   float padding2;
     packed_float3 ground_color;    float padding3;
     packed_float3 sun_direction;   float sun_intensity;
-    packed_float3 sun_color;       float padding4;
+    packed_float3 sun_color;       float tonemapper;   // the HDR path's curve: 0 = ACES fit, 1 = PBR Neutral
     float4 params;   // x: 1 = sample the equirect texture (#326), y: exposure, z: yaw offset (radians)
 };
 
@@ -46,7 +46,35 @@ fragment float4 SkyPS(SkyOut in [[stage_in]], constant SkyboxConstants& c [[buff
         const float two_pi = 6.28318530718;
         float u = atan2(dir.x, dir.z) / two_pi + 0.5 + c.params.z / two_pi;
         float v = acos(clamp(y, -1.0, 1.0)) / 3.14159265359;
-        return float4(sky_tex.sample(sky_smp, float2(u, v), level(0)).rgb * c.params.y, 1.0);
+        float3 sky = sky_tex.sample(sky_smp, float2(u, v), level(0)).rgb * c.params.y;
+        if (c.params.w < 0.0) sky = pow(saturate(sky), 1.0 / 2.2);   // a float picture the classic way: gamma-encoded, clamped
+        else if (c.params.w > 0.0)
+        {
+            // an HDR picture: the scene exposure + ACES + gamma of the lit surfaces, so the sky and the world agree
+            float3 x = max(sky * c.params.w, 0.0);
+            if (c.tonemapper > 0.5)
+            {
+                // Khronos PBR Neutral, as in standard.metal
+                float mn = min(x.r, min(x.g, x.b));
+                x -= mn < 0.08 ? mn - 6.25 * mn * mn : 0.04;
+                float peak = max(x.r, max(x.g, x.b));
+                if (peak >= 0.76)
+                {
+                    float new_peak = 1.0 - 0.0576 / (peak + 0.24 - 0.76);
+                    x *= new_peak / peak;
+                    float g = 1.0 - 1.0 / (0.15 * (peak - new_peak) + 1.0);
+                    x = mix(x, float3(new_peak), g);
+                }
+                sky = pow(saturate(x), 1.0 / 2.2);
+            }
+            else
+            {
+                float3 a = x * (x + 0.0245786) - 0.000090537;
+                float3 b = x * (0.983729 * x + 0.4329510) + 0.238081;
+                sky = pow(max(saturate(a / b), 0.0), 1.0 / 2.2);
+            }
+        }
+        return float4(sky, 1.0);
     }
     float3 color;
     if (y > 0.0)

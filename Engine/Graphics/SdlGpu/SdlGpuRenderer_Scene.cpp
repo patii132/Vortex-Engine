@@ -632,6 +632,7 @@ namespace vortex::graphics::sdlgpu
 		const PerFrameConstants& f = view.frame;
 		e.fog_color = f.fog_color; e.fog_density = f.fog_density;
 		e.fog_height_y = f.fog_height_y; e.fog_height_falloff = f.fog_height_falloff;
+		e.scene_exposure = f.scene_exposure > 0.0f ? f.scene_exposure : 0.5f; e.fog_sun_glow = f.fog_sun_glow; e.tonemapper = f.tonemapper;
 		e.sun_direction = f.light_direction; e.sun_intensity = f.directional_intensity;
 		e.sun_color = f.light_color; e.ambient = f.ambient_strength;
 		e.point_lights = f.point_light_count; e.spot_lights = f.spot_light_count;
@@ -778,10 +779,12 @@ namespace vortex::graphics::sdlgpu
 		c.camera_position = view.eye;
 		c.sky_color = m_sky_color; c.horizon_color = m_horizon_color; c.ground_color = m_ground_color;
 		c.sun_direction = m_sun_direction; c.sun_intensity = m_sun_intensity; c.sun_color = m_sun_color;
+		c.tonemapper = (float)m_frame_constants.tonemapper;
 		// the equirect map (#326) — or the white texture, so sampler slot 0 is always bound
 		auto& reg = ResourceRegistry::instance();
 		Texture* sky = (m_skybox_mode == SkyboxMode::Texture && m_sky_texture != id::invalid_id) ? reg.get_texture(m_sky_texture) : nullptr;
-		c.params = { sky ? 1.0f : 0.0f, m_sky_exposure, m_sky_rotation, 0.0f };
+		c.params = { sky ? 1.0f : 0.0f, m_sky_exposure, m_sky_rotation,
+			(sky && m_sky_hdr == 2) ? (m_frame_constants.scene_exposure > 0.0f ? m_frame_constants.scene_exposure : 0.5f) : ((sky && m_sky_hdr == 1) ? -1.0f : 0.0f) };   // w > 0: HDR sky tonemapped, w < 0: HDR sky the classic way
 		if (!sky) sky = reg.white_texture();
 		SDL_BindGPUGraphicsPipeline(pass, m_pipeline_skybox);
 		SDL_PushGPUVertexUniformData(cmd, 0, &c, sizeof(c));

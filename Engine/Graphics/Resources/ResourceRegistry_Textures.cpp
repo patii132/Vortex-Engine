@@ -134,6 +134,10 @@ namespace vortex::graphics
 		case ImageFormat::RG8:
 			desc.format = TextureFormat::RG8_UNORM;
 			break;
+		case ImageFormat::RGBA16F:
+			desc.format = TextureFormat::RGBA16_FLOAT;   // an HDR sky: sampled at mip 0 by the sky pass, tonemapped there
+			desc.generate_mips = false;
+			break;
 		case ImageFormat::RGBA8:
 		default:
 			desc.format = TextureFormat::RGBA8_UNORM;

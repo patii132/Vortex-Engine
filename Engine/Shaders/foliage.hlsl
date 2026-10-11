@@ -27,16 +27,18 @@ cbuffer PerFrame : register(b0)
     float FogHeightY;
     float FogHeightFalloff;
     uint FogMode;
-    float FogPadding;
+    float SceneExposure;   // pre-tonemap multiplier (0.5 = the classic look; <= 0 reads as 0.5)
     // Spot-light shadows (#23) — APPENDED after fog (@160), byte-matched to PerFrameConstants.
     // Per-spot shadow data lives in SpotLight (strength/bias/slot) + the ShadowVP[4] tail of the
     // light buffer; b0 only carries the atlas tile texel size (all tiles are the same size).
     float ShadowMapTexel;
-    uint3 ShadowPadding;
+    uint Tonemapper;       // 0 = ACES fit, 1 = PBR Neutral
+    uint2 ShadowPadding;
     // SSAO (#32) — APPENDED @176, byte-matched to PerFrameConstants. Screen UV is derived from
     // SV_POSITION and the AO texture's own dimensions, so no screen size travels here.
     float SsaoEnabled;
-    float3 SsaoPadding;
+    float2 SsaoPadding;
+    float FogSunGlow;      // aerial perspective: the sun's glow in the fog (0 = off)
     // Sky gradient for specular reflections — APPENDED @192, byte-matched to PerFrameConstants.
     float4 EnvSky;       // rgb zenith, w = 1 when a gradient sky is active
     float4 EnvHorizon;
@@ -62,12 +64,53 @@ float FogOpticalDepth(float density, float heightY, float k, float3 cam, float3 
     return density * (below + above * meanDensity);
 }
 
+// The scene's tonemapper (Tonemapper in the frame constants): 0 = the ACES fit — the classic look, which pulls bright
+// saturated colours towards white; 1 = Khronos PBR Neutral — hue-preserving with a gentle highlight desaturation, so a
+// sunlit desert stays orange and a red car stays red. The input is the EXPOSED scene colour (scene exposure applied).
+float3 TonemapNeutral(float3 color)
+{
+    const float startCompression = 0.8 - 0.04;
+    const float desaturation = 0.15;
+    float x = min(color.r, min(color.g, color.b));
+    float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+    color -= offset;
+    float peak = max(color.r, max(color.g, color.b));
+    if (peak < startCompression) return color;
+    const float d = 1.0 - startCompression;
+    float newPeak = 1.0 - d * d / (peak + d - startCompression);
+    color *= newPeak / peak;
+    float g = 1.0 - 1.0 / (desaturation * (peak - newPeak) + 1.0);
+    return lerp(color, newPeak * float3(1.0, 1.0, 1.0), g);
+}
+float3 TonemapScene(float3 x, uint mode)
+{
+    if (mode == 1) return saturate(TonemapNeutral(max(x, 0.0)));
+    float3 a = x * (x + 0.0245786) - 0.000090537;
+    float3 b = x * (0.983729 * x + 0.4329510) + 0.238081;
+    return saturate(a / b);
+}
+
+// Aerial perspective: what the fog scatters towards the eye. The flat FogColor, plus the sun's forward-scatter glow when
+// looking towards it (FogSunGlow 0 = off) — the haze brightens and warms around the sun like real air does.
+float3 FogInscatter(float3 worldPos)
+{
+    float3 c = FogColor;
+    if (FogSunGlow > 0.0 && DirectionalIntensity > 0.001)
+    {
+        float3 V = normalize(worldPos - CameraPosition);
+        float mu = saturate(dot(V, normalize(-LightDirection)));
+        float phase = 0.12 * mu * mu + 0.88 * pow(mu, 10.0);
+        c += LightColor * (FogSunGlow * phase);
+    }
+    return c;
+}
+
 float3 ApplyFog(float3 color, float3 worldPos)
 {
     if (FogDensity <= 0.0) return color;
     float optical = FogOpticalDepth(FogDensity, FogHeightY, FogHeightFalloff, CameraPosition, worldPos);
     float f = 1.0 - exp2(-optical);
-    return lerp(color, FogColor, saturate(f));
+    return lerp(color, FogInscatter(worldPos), saturate(f));
 }
 
 cbuffer PerObject : register(b1)
@@ -662,10 +705,7 @@ float4 PSMain(PS_IN input, bool isFront : SV_IsFrontFace) : SV_TARGET
     color = ApplyFog(color, input.worldPos);
 
     // ACES Filmic Tone Mapping (RRT+ODT fit)
-    float3 x = color * 0.5;
-    float3 a = x * (x + 0.0245786) - 0.000090537;
-    float3 b = x * (0.983729 * x + 0.4329510) + 0.238081;
-    color = saturate(a / b);
+    color = TonemapScene(color * (SceneExposure > 0.0 ? SceneExposure : 0.5), Tonemapper);   // the scene exposure, then the curve
 
     // Gamma Correction (sRGB)
     color = pow(max(color, 0.0), 1.0 / 2.2);

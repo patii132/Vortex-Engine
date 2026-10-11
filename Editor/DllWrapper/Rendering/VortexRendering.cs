@@ -858,6 +858,15 @@ namespace Editor.DllWrapper
             float density, float heightY, float heightFalloff);
 
         [DllImport(_dllName, CallingConvention = _cc)]
+        private static extern void SetSceneExposure(float multiplier);
+
+        [DllImport(_dllName, CallingConvention = _cc)]
+        private static extern void SetFogSunGlow(float glow);
+
+        [DllImport(_dllName, CallingConvention = _cc)]
+        private static extern void SetTonemapper(int mode);
+
+        [DllImport(_dllName, CallingConvention = _cc)]
         private static extern void SetPostFxVignette([MarshalAs(UnmanagedType.I1)] bool enabled,
             float intensity, float smoothness, float roundness, float r, float g, float b);
 
@@ -970,6 +979,29 @@ namespace Editor.DllWrapper
             try { SetFogParams(r, g, b, density, heightY, heightFalloff); } catch { }
         }
 
+        /// <summary>Scene exposure in STOPS, applied by the surface shaders (and an HDR sky) before the ACES curve — the
+        /// camera's aperture. 0 = the classic look; +1 doubles the light reaching the tonemapper, so a sunlit desert reads
+        /// bright without the clipping the LDR grading exposure causes. Persistent frame state like the fog.</summary>
+        public static void SetSceneExposureStops(float stops)
+        {
+            float s = stops < -6f ? -6f : (stops > 6f ? 6f : stops);
+            try { SetSceneExposure(0.5f * (float)System.Math.Pow(2.0, s)); } catch { }
+        }
+
+        /// <summary>Aerial perspective: the sun's forward-scatter glow in the fog when looking towards it (0 = the flat fog
+        /// colour; 0.3–0.6 a desert noon, 1–2 a low sun). Persistent like the fog.</summary>
+        public static void SetFogSunGlowStrength(float glow)
+        {
+            try { SetFogSunGlow(glow); } catch { }
+        }
+
+        /// <summary>The tonemapper of every lit surface, particle, decal and the HDR sky: 0 = the ACES fit (the classic look —
+        /// bright saturated colours drift towards white), 1 = Khronos PBR Neutral (hue-preserving; a sunlit desert stays orange).</summary>
+        public static void SetTonemapperMode(int mode)
+        {
+            try { SetTonemapper(mode); } catch { }
+        }
+
         /// <summary>Post-FX vignette (#29). Persistent renderer state like fog: applies to the editor
         /// viewport, the play-mode window AND shipped games until changed. All effects off = the
         /// untouched (zero-cost) render path.</summary>
@@ -1073,12 +1105,27 @@ namespace Editor.DllWrapper
         [DllImport(_dllName, CallingConvention = _cc)]
         private static extern void SetSkyboxTexture(long textureId, float exposure, float rotationDegrees);
 
+        [DllImport(_dllName, CallingConvention = _cc)]
+        private static extern void SetSkyboxTextureHdr(long textureId, float exposure, float rotationDegrees, int hdr);
+
         /// <summary>Equirect texture sky (#326): the texture the renderer's fullscreen sky pass samples in
         /// <see cref="SkyboxMode.Texture"/>, its exposure and a yaw offset in degrees. The pass draws it behind
         /// everything, centred on whichever camera renders the frame — no sphere mesh, no depth write, no fog.</summary>
         public static void ApplySkyboxTexture(long textureId, float exposure, float rotationDegrees)
         {
             try { SetSkyboxTexture(textureId, exposure, rotationDegrees); } catch (System.EntryPointNotFoundException) { }
+        }
+
+        /// <summary>The same with an HDR flag: a float picture (.hdr) is run through the scene exposure + ACES + gamma by the
+        /// sky pass, so the sky and the lit world share one exposure; an 8-bit picture is shown as it is.</summary>
+        public static void ApplySkyboxTexture(long textureId, float exposure, float rotationDegrees, bool hdr) => ApplySkyboxTexture(textureId, exposure, rotationDegrees, hdr ? 2 : 0);
+
+        /// <summary>hdrMode: 0 = an 8-bit picture shown as it is; 1 = a float picture (.hdr) shown the classic way (gamma-encoded,
+        /// clamped at white); 2 = the float picture run through the scene exposure + the tonemapper like the lit surfaces.</summary>
+        public static void ApplySkyboxTexture(long textureId, float exposure, float rotationDegrees, int hdrMode)
+        {
+            try { SetSkyboxTextureHdr(textureId, exposure, rotationDegrees, hdrMode); }
+            catch (System.EntryPointNotFoundException) { ApplySkyboxTexture(textureId, exposure, rotationDegrees); }
         }
 
         private static bool _skyboxEnabled = false;

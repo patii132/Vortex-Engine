@@ -50,10 +50,14 @@ namespace VortexEditor.Panels
 
         private void Build()
         {
+            Sections.Children.Add(Section("Exposure", "The camera's aperture: scene exposure in stops BEFORE the tonemapper. +1 doubles the light the ACES curve receives — brightens a sunlit world without the clipping of the grading exposure. 0 = the classic look.", null, null,
+                Slider("Stops", "−3 … +4 stops; a sunlit desert wants +1.5 … +2.5, a night scene −1", -3, 4, s => s.SceneExposure, (s, v) => s.SceneExposure = v),
+                Choice("Tonemapper", "ACES: the classic filmic curve — bright saturated colours drift towards white. PBR Neutral (Khronos): keeps hue and saturation, a sunlit desert stays orange.", new[] { "ACES", "PBR Neutral" }, s => s.Tonemapper, (s, v) => s.Tonemapper = v)));
             Sections.Children.Add(Section("Fog", "Height fog: distance haze plus an optional ground mist below Height Y.", s => s.FogEnabled, (s, v) => s.FogEnabled = v,
                 Slider("Density", null, 0, 0.5, s => s.FogDensity, (s, v) => s.FogDensity = v),
                 Slider("Height Y", null, -20, 20, s => s.FogHeightY, (s, v) => s.FogHeightY = v),
                 Slider("Ground Mist", "0 = uniform distance fog; higher = mist hugging the ground below Height Y", 0, 2, s => s.FogHeightFalloff, (s, v) => s.FogHeightFalloff = v),
+                Slider("Sun Glow", "Aerial perspective: the sun's glow scattered in the haze when looking towards it (0 = off, 0.3–0.6 a desert noon, 1–2 a low sun)", 0, 3, s => s.FogSunGlow, (s, v) => s.FogSunGlow = v),
                 ColorRow("Color", s => (s.FogR, s.FogG, s.FogB), (s, c) => { s.FogR = c.r; s.FogG = c.g; s.FogB = c.b; })));
             Sections.Children.Add(Section("Volumetric Fog", "Ray-marched fog (#119): light scattered towards the camera from the fog colour, the sun and every point / spot light — visible cones and shafts. Uses the Fog height and colour above; works with Fog off.", s => s.VolumetricEnabled, (s, v) => s.VolumetricEnabled = v,
                 Slider("Density", "Scattering per metre — 0.01 a haze, 0.03 fog, 0.1 a thick cellar", 0, 0.25, s => s.VolumetricDensity, (s, v) => s.VolumetricDensity = v),
@@ -102,8 +106,8 @@ namespace VortexEditor.Panels
             var body = new StackPanel { Spacing = 2 };
             var sw = new ToggleSwitch { HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right, OnContent = "", OffContent = "" };
             DockPanel.SetDock(sw, Dock.Right);
-            sw.IsCheckedChanged += (s, e) => { if (_loading) return; var st = Settings; if (st == null) return; set(st, sw.IsChecked == true); body.Opacity = sw.IsChecked == true ? 1 : 0.55; Apply(); };
-            header.Children.Add(sw);
+            sw.IsCheckedChanged += (s, e) => { if (_loading || set == null) return; var st = Settings; if (st == null) return; set(st, sw.IsChecked == true); body.Opacity = sw.IsChecked == true ? 1 : 0.55; Apply(); };
+            if (set != null) header.Children.Add(sw);   // a section without a switch (always on)
             var t = new TextBlock { Text = title, FontWeight = FontWeight.SemiBold, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
             if (tip != null) ToolTip.SetTip(t, tip);
             header.Children.Add(t);
@@ -111,7 +115,7 @@ namespace VortexEditor.Panels
             foreach (var r in rows) body.Children.Add(r);
             stack.Children.Add(body);
             card.Child = stack;
-            _refreshers.Add(() => { var st = Settings; if (st == null) return; sw.IsChecked = get(st); body.Opacity = get(st) ? 1 : 0.55; });
+            _refreshers.Add(() => { var st = Settings; if (st == null || get == null) return; sw.IsChecked = get(st); body.Opacity = get(st) ? 1 : 0.55; });
             return card;
         }
 
@@ -136,6 +140,21 @@ namespace VortexEditor.Panels
             }
             row.Children.Add(slider); row.Children.Add(box);
             _refreshers.Add(() => { var st = Settings; if (st == null) return; slider.Value = Math.Max(min, Math.Min(max, get(st))); box.Text = Fmt(get(st)); });
+            return row;
+        }
+
+        private Control Choice(string label, string tip, string[] names, Func<SceneSettings, int> get, Action<SceneSettings, int> set)
+        {
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("92,*"), Classes = { "proprow" } };
+            var lbl = new TextBlock { Text = label, Classes = { "label", "small" } };
+            if (tip != null) ToolTip.SetTip(lbl, tip);
+            row.Children.Add(lbl);
+            var combo = new ComboBox { ItemsSource = names, MinHeight = 24, FontSize = 11, Margin = new Thickness(4, 0), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch };
+            if (tip != null) ToolTip.SetTip(combo, tip);
+            Grid.SetColumn(combo, 1);
+            combo.SelectionChanged += (s, e) => { if (_loading) return; var st = Settings; if (st == null || combo.SelectedIndex < 0) return; set(st, combo.SelectedIndex); Apply(); };
+            row.Children.Add(combo);
+            _refreshers.Add(() => { var st = Settings; if (st == null) return; int i = get(st); combo.SelectedIndex = i < 0 || i >= names.Length ? 0 : i; });
             return row;
         }
 

@@ -2799,7 +2799,15 @@ namespace Editor.Core.Services
 
             VortexAPI.EnableSkybox(true);
             VortexAPI.SetSkyboxRenderMode(VortexAPI.SkyboxMode.Texture);
-            VortexAPI.ApplySkyboxTexture(_skyboxTextureId, exposure, rotationDeg);
+            // a Radiance .hdr keeps its range (RGBA16F): where the scene uses the exposure pipeline (a scene exposure or the
+            // neutral tonemapper) the sky pass exposes + tonemaps it like the lit surfaces; other scenes keep the classic look
+            int hdrMode = 0;
+            if (fullTexturePath.EndsWith(".hdr", StringComparison.OrdinalIgnoreCase))
+            {
+                var st = Data.ProjectData.Current?.ActiveScene?.Settings;
+                hdrMode = st != null && (st.SceneExposure != 0f || st.Tonemapper != 0) ? 2 : 1;
+            }
+            VortexAPI.ApplySkyboxTexture(_skyboxTextureId, exposure, rotationDeg, hdrMode);
             return true;
         }
 

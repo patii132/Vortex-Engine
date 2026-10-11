@@ -48,6 +48,8 @@ namespace vortex::graphics::dx12
 		{
 			DirectX::XMFLOAT3 fog_color{ 0, 0, 0 }; float fog_density{ 0 };
 			float fog_height_y{ 0 }, fog_height_falloff{ 0 };
+			float scene_exposure{ 0.5f }, fog_sun_glow{ 0 };   // the standard shader's pre-tonemap exposure and fog sun glow
+			u32 tonemapper{ 0 };                                // 0 = ACES fit, 1 = PBR Neutral
 			DirectX::XMFLOAT3 sun_direction{ 0.3f, -1.0f, 0.5f }; float sun_intensity{ 1 };
 			DirectX::XMFLOAT3 sun_color{ 1, 1, 1 }; float ambient{ 0.3f };
 			u32 point_lights{ 0 }, spot_lights{ 0 };

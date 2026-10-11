@@ -86,6 +86,26 @@ EDITOR_INTERFACE void SetFogParams(
 	graphics::Renderer::instance().set_fog({ colorR, colorG, colorB }, density, heightY, heightFalloff);
 }
 
+// Scene exposure: the multiplier the surface shaders apply BEFORE the ACES curve (0.5 = the classic look, one stop up
+// = x2). The editor passes 0.5 * 2^stops. Persistent frame state like the fog.
+EDITOR_INTERFACE void SetSceneExposure(float multiplier)
+{
+	graphics::Renderer::instance().set_scene_exposure(multiplier);
+}
+
+// The tonemapper of every lit surface, particle, decal and the HDR sky: 0 = the ACES fit (the classic look, desaturates
+// bright colours), 1 = Khronos PBR Neutral (keeps hue and saturation; a sunlit desert stays orange).
+EDITOR_INTERFACE void SetTonemapper(int32_t mode)
+{
+	graphics::Renderer::instance().set_tonemapper(mode > 0 ? 1u : 0u);
+}
+
+// Aerial perspective: the sun's forward-scatter glow in the fog when looking towards it (0 = the flat fog colour).
+EDITOR_INTERFACE void SetFogSunGlow(float glow)
+{
+	graphics::Renderer::instance().set_fog_sun_glow(glow);
+}
+
 // Volumetric fog (#119) — Engine/Graphics/Volumetrics/Volumetrics.h. enabled == 0 or density <= 0 = the analytic fog alone.
 // Internal ABI: changed in lockstep with Editor/DllWrapper/VortexAPI.Volumetrics.cs.
 EDITOR_INTERFACE void SetVolumetricFogParams(int32_t enabled, float density, float anisotropy, float maxDistance,

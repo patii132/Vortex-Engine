@@ -235,6 +235,13 @@ namespace vortex::graphics::dx12
 		// Fog (Welle A #27): scene-wide exp2 distance/height fog, written straight into the persistent
 		// PerFrameConstants fields (density <= 0 disables). Colors are linear 0..1.
 		void set_fog(const DirectX::XMFLOAT3& color, float density, float height_y, float height_falloff);
+		// Scene exposure: the multiplier the surface shaders apply BEFORE the ACES curve (0.5 = the classic look). One
+		// stop up = x2. Persistent frame state like the fog.
+		void set_scene_exposure(float multiplier) { m_frame_constants.scene_exposure = multiplier > 0.0f ? multiplier : 0.5f; }
+		// Aerial perspective: the sun's glow scattered into the fog when looking towards it (0 = the flat fog colour).
+		void set_fog_sun_glow(float glow) { m_frame_constants.fog_sun_glow = glow > 0.0f ? glow : 0.0f; }
+		// The tonemapper every lit surface, particle, decal and the HDR sky run through: 0 = the ACES fit, 1 = Khronos PBR Neutral.
+		void set_tonemapper(u32 mode) { m_frame_constants.tonemapper = mode > 1u ? 1u : mode; }
 
 		// Post-FX chain (#28/#29): VortexAPI setters write params(); when active() the frame's
 		// composite is redirected through the chain (editor viewport AND game window paths).
@@ -326,9 +333,11 @@ namespace vortex::graphics::dx12
 		// Equirect texture sky (#326): the registry texture the fullscreen sky pass samples in SkyboxMode::Texture.
 		void set_environment_map(id::id_type texture, int mips) { m_env_map = texture; m_env_mips = mips; }
 		D3D12_GPU_DESCRIPTOR_HANDLE env_map_srv() const;
-		void set_skybox_texture(id::id_type texture, float exposure, float rotation_radians)
+		// hdr: 0 = an 8-bit picture shown as it is; 1 = a float picture shown the classic way (gamma-encoded, clamped at white);
+		// 2 = a float picture run through the scene exposure + the tonemapper like the lit surfaces
+		void set_skybox_texture(id::id_type texture, float exposure, float rotation_radians, int hdr = 0)
 		{
-			m_sky_texture = texture; m_sky_exposure = exposure; m_sky_rotation = rotation_radians;
+			m_sky_texture = texture; m_sky_exposure = exposure; m_sky_rotation = rotation_radians; m_sky_hdr = hdr;
 		}
 		SkyboxMode get_skybox_mode() const { return m_skybox_mode; }
 		void set_skybox_colors(
@@ -633,16 +642,18 @@ namespace vortex::graphics::dx12
 			float fog_height_y;        // height-fog reference height (world Y)
 			float fog_height_falloff;  // 0 = pure distance fog; >0 = ground mist below fog_height_y
 			u32 fog_mode;              // reserved (0 today); density gates the effect
-			float fog_padding;
+			float scene_exposure;      // pre-tonemap multiplier (0.5 = the classic look; the shaders read <= 0 as 0.5)
 			// Spot-light shadows (#23) — APPENDED after fog (@160), byte-matched to standard.hlsl.
 			// Per-spot shadow data lives in GPUSpotLight (strength/bias/slot) and the light buffer's
 			// ShadowVP[4] tail; b0 only carries the atlas texel size (all tiles are the same size).
 			float shadow_map_texel;    // 1 / tile size (ready for a PCF kernel later)
-			u32 shadow_padding[3];
+			u32 tonemapper;            // 0 = ACES fit (classic), 1 = Khronos PBR Neutral (hue-preserving)
+			u32 shadow_padding[2];
 			// SSAO (#32) — APPENDED @176. The standard PS samples t10 only when enabled > 0.5;
 			// the UV comes from SV_POSITION / (AO texture dims * 2), so no screen size travels here.
 			float ssao_enabled;
-			float ssao_padding[3];
+			float ssao_padding[2];
+			float fog_sun_glow;        // aerial perspective: the sun's forward-scatter glow in the fog (0 = off)
 			// Sky gradient for specular reflections (#metal-env) — APPENDED @192, byte-matched to standard.hlsl.
 			// w of env_sky = 1 when a gradient sky is active (0 = the shader's neutral fallback environment).
 			DirectX::XMFLOAT4 env_sky;
@@ -844,6 +855,7 @@ namespace vortex::graphics::dx12
 		SkyboxMode m_skybox_mode{ SkyboxMode::Gradient };
 		id::id_type m_sky_texture{ id::invalid_id };
 		float m_sky_exposure{ 1.0f };
+		int m_sky_hdr{ 0 };   // 0 = 8-bit sky, 1 = float sky shown the classic way, 2 = float sky through exposure + tonemapper
 		float m_sky_rotation{ 0.0f };
 		// last gradient colours (the skybox pipeline keeps its own copy) -> PerFrame env for metal reflections
 		DirectX::XMFLOAT3 m_env_sky{ 0.3f, 0.5f, 0.85f };

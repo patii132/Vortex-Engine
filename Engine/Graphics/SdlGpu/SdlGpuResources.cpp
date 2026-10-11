@@ -618,6 +618,7 @@ namespace vortex::graphics
 		{
 		case ImageFormat::R8: desc.format = TextureFormat::R8_UNORM; break;
 		case ImageFormat::RG8: desc.format = TextureFormat::RG8_UNORM; break;
+		case ImageFormat::RGBA16F: desc.format = TextureFormat::RGBA16_FLOAT; desc.generate_mips = false; break;   // an HDR sky: mip 0 only
 		default: desc.format = TextureFormat::RGBA8_UNORM; break;
 		}
 		return create_texture(desc, pixel_data);
