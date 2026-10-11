@@ -397,7 +397,7 @@ static inline float2 sand_ripples(float2 p, float cam_dist, float sand_w)
     float f = fract(phase);
     float slope = f < 0.7 ? 0.35 : -0.82;
     slope *= smoothstep(0.0, 0.06, abs(f - 0.7)) * smoothstep(0.0, 0.04, min(f, 1.0 - f));   // rounded crests and troughs
-    return -slope * 0.22 * patches * fade * aa * wind;
+    return -slope * 0.16 * patches * fade * aa * wind;
 }
 static inline float macro_variation(float2 world_xz)
 {

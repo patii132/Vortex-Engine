@@ -433,7 +433,7 @@ float2 SandRipples(float2 p, float camDist, float sandW)
     float f = frac(phase);
     float slope = f < 0.7 ? 0.35 : -0.82;
     slope *= smoothstep(0.0, 0.06, abs(f - 0.7)) * smoothstep(0.0, 0.04, min(f, 1.0 - f));   // rounded crests and troughs
-    return -slope * 0.22 * patches * fade * aa * wind;
+    return -slope * 0.16 * patches * fade * aa * wind;
 }
 float MacroVariation(float2 worldXZ)
 {

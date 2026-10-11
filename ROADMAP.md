@@ -44,11 +44,17 @@ original-quality downloads (#289).
 1. **The look first (user decision, 2026-10-11): the rendering is finished before multiplayer starts.** On the branch
    `feat/water-step2` (PR #445) so far: the exposure pipeline (scene exposure in stops, ACES / PBR Neutral, the HDR sky
    through the same curve, aerial perspective on the world and the sky), soft sun shadows, FXAA, the ground bounce,
-   block-compressed textures with a disk cache (4K maps at an eighth of the memory), the terrain to the horizon, and
-   **dynamic GI step 1: screen-space GI** (one bounce traced in the SSAO pass, DX12 / Metal / Vulkan).
+   block-compressed textures with a disk cache (4K maps at an eighth of the memory), the terrain to the horizon,
+   **dynamic GI step 1: screen-space GI** (one bounce traced in the SSAO pass, DX12 / Metal / Vulkan), and since
+   2026-10-12: contact-hardening sun shadows (a blocker probe from comparison taps, sharp at the foot, soft 10 m up),
+   leaf translucency (backlit crowns glow), procedural sand ripples, **dynamic GI step 2a: the bounce from the sun's
+   shadow map** (the far cascade read as a reflective shadow map — off-screen sunlit ground lights trunks, walls and
+   undergrowth), and the oasis calibrated against the reference pictures (measured sand hue within 3 %, shade 3 : 1).
 2. **Dynamic GI, the full build (#257) — the techniques behind Lumen, implemented from the published papers, never from
    Epic's source:**
-   - step 2 *world-space radiance cache*: a probe volume around the camera (DDGI-style irradiance + visibility probes,
+   - step 2a ✅ *the bounce from the sun's shadow map* (2026-10-12): the sunlit world as seen by the sun is the emitter
+     set; it needs no new scene representation and runs on every backend — but it is one bounce of the sun only;
+   - step 2b *world-space radiance cache*: a probe volume around the camera (DDGI-style irradiance + visibility probes,
      relocated out of walls) fed by rays; the screen traces of step 1 fall back to the probes where the screen has no answer;
    - step 3 *software ray tracing*: a global signed distance field of the static world (meshes voxelised at import, the
      terrain analytic) and a surface cache (albedo / normal / lighting cards per mesh) the probe rays march on every GPU
