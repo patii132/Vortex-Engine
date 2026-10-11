@@ -319,6 +319,7 @@ namespace vortex::graphics::sdlgpu
 						XMMATRIX proj = XMMatrixOrthographicOffCenterLH(cx - radius, cx + radius, cy - radius, cy + radius, cz - radius - m_dir_shadow_distance, cz + radius);
 						XMStoreFloat4x4(&m_csm_vp[c], lightView * proj);
 						m_csm_splits[c] = splitFar;
+						m_csm_radius[c] = radius;
 						splitNear = splitFar;
 					}
 					m_csm_count = CSM_CASCADES;

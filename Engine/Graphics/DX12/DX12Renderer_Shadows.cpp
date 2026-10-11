@@ -451,6 +451,7 @@ namespace vortex::graphics::dx12
 				cz - radius - m_dir_shadow_distance, cz + radius);
 			XMStoreFloat4x4(&m_csm_vp[c], lightView * proj);
 			m_csm_splits[c] = splitFar;
+			m_csm_radius[c] = radius;
 
 			// The depth pass's b0 clone for this cascade (slots after the spot tiles).
 			if (m_shadow_pass_cb_mapped)

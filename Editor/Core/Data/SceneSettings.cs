@@ -131,6 +131,7 @@ namespace Editor.Core.Data
             DllWrapper.VortexAPI.SetPostBloom(BloomEnabled, BloomThreshold, BloomKnee, BloomIntensity, BloomScatter);
             DllWrapper.VortexAPI.SetAmbientOcclusion(AoEnabled, AoRadius, AoIntensity);
             DllWrapper.VortexAPI.SetGlobalIllumination(GiEnabled && AoEnabled, GiStrength, GiRadius);
+            DllWrapper.VortexAPI.SetGlobalIlluminationBounce(BounceR, BounceG, BounceB, true);   // the sunlit ground's colour for the shadow-map bounce (#257 step 2)
             DllWrapper.VortexAPI.SetVolumetricFog(VolumetricEnabled, VolumetricDensity, VolumetricAnisotropy, VolumetricDistance, VolumetricNoise,
                 VolumetricNoiseScale, VolumetricNoiseSpeed, VolumetricSun, VolumetricLights, VolumetricAmbient, VolumetricSteps, VolumetricShadows);
         }

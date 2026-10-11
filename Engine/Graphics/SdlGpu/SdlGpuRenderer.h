@@ -196,6 +196,7 @@ namespace vortex::graphics::sdlgpu
 		// Screen-space GI (#257 step 1): one bounce traced in the SSAO pass (needs SSAO on); strength scales the bounce,
 		// radius = the trace length in metres.
 		void set_gi(bool enabled, float strength, float radius) { m_gi_enabled = enabled && strength > 0.001f; m_gi_strength = strength < 0.0f ? 0.0f : strength; m_gi_radius = radius < 0.25f ? 0.25f : radius; }
+		void set_gi_ground_albedo(float r, float g, float b, bool rsm) { m_gi_albedo = { r < 0 ? 0 : r, g < 0 ? 0 : g, b < 0 ? 0 : b }; m_rsm_enabled = rsm; }
 		void set_ssao(bool enabled, float radius, float intensity)
 		{
 			m_ssao_enabled = enabled && intensity > 0.001f;
@@ -783,6 +784,7 @@ namespace vortex::graphics::sdlgpu
 		bool m_scene_copy_valid{ false };
 		// screen-space GI (#257 step 1): the last frame's copy is the GI pass's radiance source; its VP reprojects into it
 		bool m_gi_enabled{ false }; float m_gi_strength{ 1.0f }, m_gi_radius{ 2.5f };
+		bool m_rsm_enabled{ true }; DirectX::XMFLOAT3 m_gi_albedo{ 0.45f, 0.38f, 0.30f };   // the bounce from the sun's shadow map and the ground colour it carries
 		DirectX::XMFLOAT4X4 m_gi_prev_view_projection{}; u32 m_gi_prev_w{ 0 }, m_gi_prev_h{ 0 }; bool m_gi_prev_valid{ false };
 		u32 m_transparent_runs_seen{ 0 };   // record_runs: how many transparent runs the last scan found
 		void copy_scene_for_transparents(SDL_GPUCommandBuffer* cmd, const GpuTarget& target);
@@ -818,6 +820,7 @@ namespace vortex::graphics::sdlgpu
 		u32 m_shadow_spot_count{ 0 };
 		DirectX::XMFLOAT4X4 m_csm_vp[CSM_CASCADES]{};
 		float m_csm_splits[CSM_CASCADES]{};
+		float m_csm_radius[CSM_CASCADES]{};   // each cascade's half extent (m): the bounce gather needs metres per tile uv
 		u32 m_csm_count{ 0 };
 		struct ShadowPoint { int light_index; float strength; float bias; DirectX::XMFLOAT4X4 face_vp[6]; };
 		ShadowPoint m_shadow_points[MAX_SHADOW_POINTS]{};

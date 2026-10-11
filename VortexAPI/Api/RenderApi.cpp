@@ -702,6 +702,13 @@ EDITOR_INTERFACE void SetGlobalIllumination(bool enabled, float strength, float 
 	graphics::Renderer::instance().set_gi(enabled, strength, radius);
 }
 
+// #257 step 2: the bounce from the sun's shadow map — the ground's albedo the sunlit emitters carry (the scene's bounce
+// colour), and whether that reflective-shadow-map gather runs at all.
+EDITOR_INTERFACE void SetGlobalIlluminationBounce(float r, float g, float b, bool shadow_map_bounce)
+{
+	graphics::Renderer::instance().set_gi_ground_albedo(r, g, b, shadow_map_bounce);
+}
+
 // Main-view gate: post-FX in the PRIMARY swapchain. The GameHost player enables it at boot (there the
 // main view IS the game); the editor leaves it off so the freecam build viewport stays clean (its
 // Environment panel may toggle it for a preview). The play-mode game window always applies effects.

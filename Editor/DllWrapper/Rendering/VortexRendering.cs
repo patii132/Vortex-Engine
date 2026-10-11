@@ -1103,6 +1103,16 @@ namespace Editor.DllWrapper
             try { SetGlobalIlluminationNative(enabled, strength, radius); } catch { }
         }
 
+        [DllImport(_dllName, CallingConvention = _cc, EntryPoint = "SetGlobalIlluminationBounce")]
+        private static extern void SetGlobalIlluminationBounceNative(float r, float g, float b, [MarshalAs(UnmanagedType.I1)] bool shadowMapBounce);
+
+        /// <summary>#257 step 2: the bounce gathered from the sun's shadow map — every sunlit point the sun sees lights its
+        /// surroundings with this ground colour (the scene's bounce colour); off = the screen-space trace alone.</summary>
+        public static void SetGlobalIlluminationBounce(float r, float g, float b, bool shadowMapBounce)
+        {
+            try { SetGlobalIlluminationBounceNative(r, g, b, shadowMapBounce); } catch { }
+        }
+
         #endregion
 
         #region Skybox

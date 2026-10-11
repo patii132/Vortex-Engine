@@ -19,6 +19,12 @@ struct SsaoCB
     float scene_exposure;       // the previous frame's pre-tonemap multiplier
     float prev_valid;           // 1 = prev_color is last frame's opaque picture at this size
     float gi_radius;            // world-space trace length (m)
+    // the bounce from the sun's shadow map (#257 step 2, a reflective shadow map read from depth alone) — appended @240
+    float4x4 view_to_rsm;       // view -> the bounce cascade's clip
+    float4x4 rsm_to_view;       // the bounce cascade's clip -> view
+    float4 rsm_tile;            // xy the cascade's tile offset in the atlas (uv), z the tile scale, w one atlas texel (uv)
+    float4 rsm_sun_view;        // xyz towards the sun in view space, w the gather radius in tile uv
+    float4 rsm_flux;            // rgb ground albedo x sun colour x intensity (the emitters' radiance before the cosines), w the gather radius (m); 0 = off
 };
 
 struct FsOut
@@ -54,7 +60,8 @@ static inline float hash12(float2 p)
 
 fragment float4 SsaoPS(FsOut in [[stage_in]], constant SsaoCB& c [[buffer(0)]],
                        depth2d<float> depth [[texture(0)]], sampler smp [[sampler(0)]],
-                       texture2d<float> prev_color [[texture(1)]], sampler psmp [[sampler(1)]])
+                       texture2d<float> prev_color [[texture(1)]], sampler psmp [[sampler(1)]],
+                       depth2d<float> csm [[texture(2)]], sampler csmp [[sampler(2)]])
 {
     float d = depth.sample(smp, in.uv);
     if (d >= 0.9999) return float4(1.0);
@@ -121,6 +128,54 @@ fragment float4 SsaoPS(FsOut in [[stage_in]], constant SsaoCB& c [[buffer(0)]],
         gi *= c.gi_strength / (float)DIRS;
         float gl = dot(gi, float3(0.2126, 0.7152, 0.0722));
         gi = mix(float3(gl), gi, 0.65);   // a bounce is never as saturated as the albedo squared suggests
+    }
+    // ---- the bounce from the sun's shadow map (#257 step 2): every point the sun sees is a Lambertian emitter of the ground's
+    // colour; a disk of them around the receiver in the cascade is gathered with the full geometric term, their normals from
+    // the map's own depth gradient. Off-screen sand lights the shaded floor and the trunks — what the screen trace cannot see.
+    if (c.gi_strength > 0.0 && c.rsm_flux.w > 0.0)
+    {
+        float4 lp = c.view_to_rsm * float4(P, 1.0);
+        if (lp.w > 0.001)
+        {
+            float2 tuv = (lp.xy / lp.w) * float2(0.5, -0.5) + 0.5;
+            if (tuv.x > 0.02 && tuv.x < 0.98 && tuv.y > 0.02 && tuv.y < 0.98)
+            {
+                float3 L = c.rsm_sun_view.xyz;
+                float R = c.rsm_sun_view.w, Rm = c.rsm_flux.w;
+                const int K = 12;
+                float area = 3.14159265 * Rm * Rm / (float)K;
+                float tx = c.rsm_tile.w / c.rsm_tile.z;   // one atlas texel in tile uv
+                float3 E = float3(0.0);
+                float ang = hash12(in.pos.xy * 1.7 + 3.1) * 6.2831853;
+                for (int k = 0; k < K; ++k)
+                {
+                    float a = ang + (float)k * 2.3999632;
+                    float r = R * sqrt(((float)k + 0.5) / (float)K);
+                    float2 uvk = tuv + float2(cos(a), sin(a)) * r;
+                    float2 auv = uvk * c.rsm_tile.z + c.rsm_tile.xy;
+                    float dk = csm.sample(csmp, auv);
+                    if (dk >= 0.9999) continue;
+                    float2 nk = uvk * float2(2.0, -2.0) + float2(-1.0, 1.0);
+                    float4 vx = c.rsm_to_view * float4(nk, dk, 1.0);
+                    float3 X = vx.xyz / vx.w;
+                    float dkx = csm.sample(csmp, auv + float2(c.rsm_tile.w, 0.0));
+                    float dky = csm.sample(csmp, auv + float2(0.0, c.rsm_tile.w));
+                    float4 vxx = c.rsm_to_view * float4(nk + float2(2.0 * tx, 0.0), dkx, 1.0);
+                    float4 vxy = c.rsm_to_view * float4(nk - float2(0.0, 2.0 * tx), dky, 1.0);
+                    float3 Nk = cross(vxx.xyz / vxx.w - X, vxy.xyz / vxy.w - X);
+                    float nl = dot(Nk, Nk);
+                    if (nl < 1e-12) continue;
+                    Nk *= rsqrt(nl);
+                    if (dot(Nk, L) < 0.0) Nk = -Nk;   // the sun sees it, so it faces the sun
+                    float3 w = X - P;
+                    float d2 = max(dot(w, w), 0.25);
+                    w *= rsqrt(d2);
+                    float g = max(dot(N, w), 0.0) * max(dot(Nk, -w), 0.0) * max(dot(Nk, L), 0.0);
+                    E += g * (area / d2);
+                }
+                gi += c.rsm_flux.rgb * E * (c.gi_strength / 3.14159265);
+            }
+        }
     }
     return float4(sqrt(saturate(gi * 0.25)), ao);
 }

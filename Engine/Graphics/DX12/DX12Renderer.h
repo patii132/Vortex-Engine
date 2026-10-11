@@ -220,6 +220,7 @@ namespace vortex::graphics::dx12
 		// world units, intensity 0..~2; enabled=false or intensity 0 = the pass never records.
 		// Screen-space GI (#257 step 1): one bounce traced in the SSAO pass (needs SSAO on).
 		void set_gi(bool enabled, float strength, float radius) { m_gi_enabled = enabled && strength > 0.001f; m_gi_strength = strength < 0.0f ? 0.0f : strength; m_gi_radius = radius < 0.25f ? 0.25f : radius; }
+		void set_gi_ground_albedo(float r, float g, float b, bool rsm) { m_gi_albedo = { r < 0 ? 0 : r, g < 0 ? 0 : g, b < 0 ? 0 : b }; m_rsm_enabled = rsm; }
 		void set_ssao(bool enabled, float radius, float intensity)
 		{
 			m_ssao_enabled = enabled && intensity > 0.001f;
@@ -960,6 +961,7 @@ namespace vortex::graphics::dx12
 		D3D12_GPU_DESCRIPTOR_HANDLE m_csm_srv_gpu{};
 		u32 m_csm_map_size{ 0 };
 		DirectX::XMFLOAT4X4 m_csm_vp[CSM_CASCADES]{};
+		float m_csm_radius[CSM_CASCADES]{};                 // each cascade's half extent (m): the bounce gather needs metres per tile uv
 		float m_csm_splits[CSM_CASCADES]{};                 // far view-distance of each cascade
 		u32 m_csm_count{ 0 };                               // 0 = no directional shadows this frame
 		// Directional shadow authoring state (set_directional_light_full).
@@ -992,7 +994,10 @@ namespace vortex::graphics::dx12
 			ComPtr<ID3D12Resource> blur;                // RGBA8 blurred (sampled at t10)
 			ComPtr<ID3D12DescriptorHeap> dsv_heap;      // 1 DSV
 			ComPtr<ID3D12DescriptorHeap> rtv_heap;      // 2 RTVs (ao, blur)
-			ComPtr<ID3D12DescriptorHeap> srv_heap;      // 3 shader-visible SRVs (depth, ao, the previous frame's colour) for the gen/blur passes
+			ComPtr<ID3D12DescriptorHeap> srv_heap;      // 4 shader-visible SRVs (depth, ao, the previous frame's colour, the sun's cascade atlas) for the gen/blur passes
+			ComPtr<ID3D12Resource> cb;                  // the pass constants (416 B) as a CBV: three 512-byte slots rotate per record
+			u8* cb_mapped{ nullptr };
+			u32 cb_cursor{ 0 };
 			D3D12_RESOURCE_STATES depth_state{ D3D12_RESOURCE_STATE_DEPTH_WRITE };
 			D3D12_RESOURCE_STATES ao_state{ D3D12_RESOURCE_STATE_RENDER_TARGET };
 			D3D12_RESOURCE_STATES blur_state{ D3D12_RESOURCE_STATE_RENDER_TARGET };
@@ -1009,6 +1014,7 @@ namespace vortex::graphics::dx12
 		D3D12_GPU_DESCRIPTOR_HANDLE m_ssao_current_srv{};      // what render_3d_scene binds this pass
 		// screen-space GI (#257 step 1): the previous frame's opaque colour copy (the particle module's) is the radiance source
 		bool m_gi_enabled{ false }; float m_gi_strength{ 1.0f }, m_gi_radius{ 2.5f };
+		bool m_rsm_enabled{ true }; DirectX::XMFLOAT3 m_gi_albedo{ 0.45f, 0.38f, 0.30f };   // the bounce from the sun's shadow map and the ground colour it carries
 		DX12Particles::DepthCopy* m_gi_prev_copy{ nullptr }; u32 m_gi_prev_w{ 0 }, m_gi_prev_h{ 0 };
 		bool m_ssao_enabled{ false };
 		float m_ssao_radius{ 0.6f };

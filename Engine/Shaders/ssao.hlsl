@@ -23,10 +23,17 @@ cbuffer SsaoCB : register(b0)
     float  SceneExposure;         // the pre-tonemap multiplier the previous frame was rendered with
     float  PrevValid;             // 1 = PrevColor holds last frame's opaque picture at this view's size
     float  GiRadius;              // world-space trace length (m)
+    // the bounce from the sun's shadow map (#257 step 2, a reflective shadow map read from depth alone) — appended @240
+    row_major float4x4 ViewToRsm;     // view -> the bounce cascade's clip
+    row_major float4x4 RsmToView;     // the bounce cascade's clip -> view
+    float4 RsmTile;               // xy the cascade's tile offset in the atlas (uv), z the tile scale, w one atlas texel (uv)
+    float4 RsmSunView;            // xyz towards the sun in view space, w the gather radius in tile uv
+    float4 RsmFlux;               // rgb ground albedo x sun colour x intensity (the emitters' radiance before the cosines), w the gather radius (m); 0 = off
 };
 
 Texture2D    Src : register(t0);   // PSMain: AO depth (R32_FLOAT). PSBlur: raw AO + GI (RGBA8).
 Texture2D    PrevColor : register(t1);   // PSMain: the previous frame's opaque colour (LDR, tonemapped)
+Texture2D    Csm : register(t2);         // PSMain: the sun's cascade atlas (R32_FLOAT depth) — the bounce's emitters
 SamplerState Smp : register(s0);   // point/clamp — depth must not be filtered
 
 struct VS_OUT
@@ -144,6 +151,55 @@ float4 PSMain(VS_OUT i) : SV_TARGET
         gi *= GiStrength / (float)DIRS;
         float gl = dot(gi, float3(0.2126, 0.7152, 0.0722));
         gi = lerp(float3(gl, gl, gl), gi, 0.65);   // a bounce is never as saturated as the albedo squared suggests
+    }
+    // ---- the bounce from the sun's shadow map (#257 step 2): every point the sun sees is a Lambertian emitter of the ground's
+    // colour; a disk of them around the receiver in the cascade is gathered with the full geometric term, their normals from
+    // the map's own depth gradient. Off-screen sand lights the shaded floor and the trunks — what the screen trace cannot see.
+    if (GiStrength > 0.0 && RsmFlux.w > 0.0)
+    {
+        float4 lp = mul(float4(P, 1.0), ViewToRsm);
+        if (lp.w > 0.001)
+        {
+            float2 tuv = (lp.xy / lp.w) * float2(0.5, -0.5) + 0.5;
+            if (tuv.x > 0.02 && tuv.x < 0.98 && tuv.y > 0.02 && tuv.y < 0.98)
+            {
+                float3 L = RsmSunView.xyz;
+                float R = RsmSunView.w, Rm = RsmFlux.w;
+                const int K = 12;
+                float area = 3.14159265 * Rm * Rm / (float)K;
+                float tx = RsmTile.w / RsmTile.z;   // one atlas texel in tile uv
+                float3 E = float3(0.0, 0.0, 0.0);
+                float ang = Hash12(i.pos.xy * 1.7 + 3.1) * 6.2831853;
+                [unroll]
+                for (int k = 0; k < K; ++k)
+                {
+                    float a = ang + (float)k * 2.3999632;
+                    float r = R * sqrt(((float)k + 0.5) / (float)K);
+                    float2 uvk = tuv + float2(cos(a), sin(a)) * r;
+                    float2 auv = uvk * RsmTile.z + RsmTile.xy;
+                    float dk = Csm.SampleLevel(Smp, auv, 0).r;
+                    if (dk >= 0.9999) continue;
+                    float2 nk = uvk * float2(2.0, -2.0) + float2(-1.0, 1.0);
+                    float4 vx = mul(float4(nk, dk, 1.0), RsmToView);
+                    float3 X = vx.xyz / vx.w;
+                    float dkx = Csm.SampleLevel(Smp, auv + float2(RsmTile.w, 0.0), 0).r;
+                    float dky = Csm.SampleLevel(Smp, auv + float2(0.0, RsmTile.w), 0).r;
+                    float4 vxx = mul(float4(nk + float2(2.0 * tx, 0.0), dkx, 1.0), RsmToView);
+                    float4 vxy = mul(float4(nk - float2(0.0, 2.0 * tx), dky, 1.0), RsmToView);
+                    float3 Nk = cross(vxx.xyz / vxx.w - X, vxy.xyz / vxy.w - X);
+                    float nl = dot(Nk, Nk);
+                    if (nl < 1e-12) continue;
+                    Nk *= rsqrt(nl);
+                    if (dot(Nk, L) < 0.0) Nk = -Nk;   // the sun sees it, so it faces the sun
+                    float3 w = X - P;
+                    float d2 = max(dot(w, w), 0.25);
+                    w *= rsqrt(d2);
+                    float g = max(dot(N, w), 0.0) * max(dot(Nk, -w), 0.0) * max(dot(Nk, L), 0.0);
+                    E += g * (area / d2);
+                }
+                gi += RsmFlux.rgb * E * (GiStrength / 3.14159265);
+            }
+        }
     }
     return float4(sqrt(saturate(gi * 0.25)), ao);
 }

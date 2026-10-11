@@ -54,7 +54,7 @@ namespace vortex::graphics::dx12
 			return true;
 		}
 
-		// Byte-matched to ssao.hlsl's SsaoCB (uploaded as 24 root constants).
+		// Byte-matched to ssao.hlsl's SsaoCB (a CBV at b0 since the bounce; it was 60 root constants).
 		struct SsaoCB
 		{
 			DirectX::XMFLOAT4X4 inv_proj;
@@ -67,8 +67,11 @@ namespace vortex::graphics::dx12
 			// screen-space GI (#257 step 1)
 			DirectX::XMFLOAT4X4 proj, view_to_prev_clip;
 			float gi_strength, scene_exposure, prev_valid, gi_radius;
+			// the bounce from the sun's shadow map (#257 step 2) — appended @240
+			DirectX::XMFLOAT4X4 view_to_rsm, rsm_to_view;
+			float rsm_tile[4], rsm_sun_view[4], rsm_flux[4];
 		};
-		static_assert(sizeof(SsaoCB) == 240, "SsaoCB must byte-match ssao.hlsl (60 root constants)");
+		static_assert(sizeof(SsaoCB) == 416, "SsaoCB must byte-match ssao.hlsl (a CBV at b0)");
 
 		using PFN_D3D12SerializeRootSignature = HRESULT(WINAPI*)(const D3D12_ROOT_SIGNATURE_DESC*, D3D_ROOT_SIGNATURE_VERSION, ID3DBlob**, ID3DBlob**);
 		PFN_D3D12SerializeRootSignature get_serialize_root_signature_ssao()
@@ -109,19 +112,28 @@ namespace vortex::graphics::dx12
 			range_prev.NumDescriptors = 1;
 			range_prev.BaseShaderRegister = 1;
 
-			D3D12_ROOT_PARAMETER params[3]{};
+			D3D12_DESCRIPTOR_RANGE range_csm{};    // t2: the sun's cascade atlas (the bounce's emitters)
+			range_csm.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+			range_csm.NumDescriptors = 1;
+			range_csm.BaseShaderRegister = 2;
+
+			D3D12_ROOT_PARAMETER params[4]{};
 			params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 			params[0].DescriptorTable.NumDescriptorRanges = 1;
 			params[0].DescriptorTable.pDescriptorRanges = &range;
 			params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-			params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-			params[1].Constants.ShaderRegister = 0;
-			params[1].Constants.Num32BitValues = sizeof(SsaoCB) / 4;
+			params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;   // b0: 416 bytes outgrew the root-constant budget with the bounce
+			params[1].Descriptor.ShaderRegister = 0;
+			params[1].Descriptor.RegisterSpace = 0;
 			params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 			params[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 			params[2].DescriptorTable.NumDescriptorRanges = 1;
 			params[2].DescriptorTable.pDescriptorRanges = &range_prev;
 			params[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+			params[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+			params[3].DescriptorTable.NumDescriptorRanges = 1;
+			params[3].DescriptorTable.pDescriptorRanges = &range_csm;
+			params[3].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
 			D3D12_STATIC_SAMPLER_DESC smp{};
 			smp.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;   // depth must not be filtered
@@ -131,7 +143,7 @@ namespace vortex::graphics::dx12
 			smp.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
 			D3D12_ROOT_SIGNATURE_DESC rs{};
-			rs.NumParameters = 3;
+			rs.NumParameters = 4;
 			rs.pParameters = params;
 			rs.NumStaticSamplers = 1;
 			rs.pStaticSamplers = &smp;
@@ -240,9 +252,18 @@ namespace vortex::graphics::dx12
 			if (FAILED(dev->CreateDescriptorHeap(&dh, IID_PPV_ARGS(&v.dsv_heap)))) return false;
 			dh.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV; dh.NumDescriptors = 2;
 			if (FAILED(dev->CreateDescriptorHeap(&dh, IID_PPV_ARGS(&v.rtv_heap)))) return false;
-			dh.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV; dh.NumDescriptors = 3;
+			dh.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV; dh.NumDescriptors = 4;
 			dh.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 			if (FAILED(dev->CreateDescriptorHeap(&dh, IID_PPV_ARGS(&v.srv_heap)))) return false;
+			// the pass constants as a CBV (416 bytes outgrew the root-constant budget with the bounce): three 512-byte slots rotate
+			D3D12_HEAP_PROPERTIES cup{}; cup.Type = D3D12_HEAP_TYPE_UPLOAD;
+			D3D12_RESOURCE_DESC cbd{};
+			cbd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER; cbd.Width = 3 * 512; cbd.Height = 1; cbd.DepthOrArraySize = 1; cbd.MipLevels = 1;
+			cbd.SampleDesc.Count = 1; cbd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+			if (FAILED(dev->CreateCommittedResource(&cup, D3D12_HEAP_FLAG_NONE, &cbd, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&v.cb)))) return false;
+			D3D12_RANGE none{ 0, 0 }; void* mp = nullptr;
+			if (FAILED(v.cb->Map(0, &none, &mp))) return false;
+			v.cb_mapped = (u8*)mp;
 		}
 		const u32 rtv_inc = dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 		const u32 srv_inc = dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -420,6 +441,49 @@ namespace vortex::graphics::dx12
 		cb.gi_strength = m_gi_enabled ? m_gi_strength : 0.0f;
 		cb.scene_exposure = m_frame_constants.scene_exposure > 0.0f ? m_frame_constants.scene_exposure : 0.5f;
 		cb.prev_valid = gi_prev ? 1.0f : 0.0f; cb.gi_radius = m_gi_radius;
+		// the bounce from the sun's shadow map (#257 step 2): the far cascade (it holds every receiver and its surroundings) read
+		// as a reflective shadow map — the ground's albedo x the sun as the emitters' radiance
+		const bool rsm_on = slot == 0 && m_gi_enabled && m_csm_count > 0 && m_csm_map && m_directional_intensity > 0.001f && m_rsm_enabled;
+		if (rsm_on)
+		{
+			const u32 c = m_csm_count - 1;
+			XMMATRIX rsmVP = XMLoadFloat4x4(&m_csm_vp[c]);
+			XMMATRIX vp = XMLoadFloat4x4(&m_frame_constants.view_projection);
+			XMMATRIX inv_vp = XMMatrixInverse(nullptr, vp);
+			XMStoreFloat4x4(&cb.view_to_rsm, proj * inv_vp * rsmVP);
+			XMStoreFloat4x4(&cb.rsm_to_view, XMMatrixInverse(nullptr, rsmVP) * vp * XMMatrixInverse(nullptr, proj));
+			cb.rsm_tile[0] = (c & 1) ? 0.5f : 0.0f; cb.rsm_tile[1] = (c & 2) ? 0.5f : 0.0f; cb.rsm_tile[2] = 0.5f; cb.rsm_tile[3] = 1.0f / (2.0f * (float)SHADOW_TILE_SIZE);
+			XMVECTOR Lw = XMVector3Normalize(XMVectorNegate(XMLoadFloat3(&m_light_direction)));
+			XMMATRIX V = XMMatrixLookAtLH(XMLoadFloat3(&m_camera_position), XMLoadFloat3(&m_camera_target), XMLoadFloat3(&m_camera_up));
+			XMVECTOR Lv = XMVector3Normalize(XMVector3TransformNormal(Lw, V));
+			const float radius_m = (std::max)(2.0f, m_gi_radius * 2.0f);
+			const float cascade_r = m_csm_radius[c] > 0.5f ? m_csm_radius[c] : 0.5f;
+			cb.rsm_sun_view[0] = XMVectorGetX(Lv); cb.rsm_sun_view[1] = XMVectorGetY(Lv); cb.rsm_sun_view[2] = XMVectorGetZ(Lv);
+			cb.rsm_sun_view[3] = (std::min)(0.3f, radius_m / (2.0f * cascade_r));
+			cb.rsm_flux[0] = m_gi_albedo.x * m_light_color.x * m_directional_intensity; cb.rsm_flux[1] = m_gi_albedo.y * m_light_color.y * m_directional_intensity;
+			cb.rsm_flux[2] = m_gi_albedo.z * m_light_color.z * m_directional_intensity; cb.rsm_flux[3] = radius_m;
+		}
+		{
+			// t2 of the AO pass: the sun's cascade atlas as a plain depth texture (the bounce's emitters)
+			auto* dev3 = DX12Core::instance().device();
+			const u32 inc3 = dev3->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+			auto srv3 = v.srv_heap->GetCPUDescriptorHandleForHeapStart(); srv3.ptr += 3 * inc3;
+			D3D12_SHADER_RESOURCE_VIEW_DESC sd3{};
+			sd3.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; sd3.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; sd3.Texture2D.MipLevels = 1;
+			sd3.Format = DXGI_FORMAT_R32_FLOAT;
+			if (rsm_on)
+			{
+				dev3->CreateShaderResourceView(m_csm_map.Get(), &sd3, srv3);
+				if (m_csm_map_state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+				{
+					D3D12_RESOURCE_BARRIER b{};
+					b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; b.Transition.pResource = m_csm_map.Get();
+					b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES; b.Transition.StateBefore = m_csm_map_state; b.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+					m_command_list->ResourceBarrier(1, &b); m_csm_map_state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+				}
+			}
+			else dev3->CreateShaderResourceView(v.depth.Get(), &sd3, srv3);   // a valid descriptor; the shader does not read it
+		}
 		{
 			// t1 of the AO pass: the copy's SRV written into the pass-local heap (a shader-visible heap cannot be copied from)
 			auto* dev2 = DX12Core::instance().device();
@@ -459,6 +523,10 @@ namespace vortex::graphics::dx12
 		auto srv_gpu0 = v.srv_heap->GetGPUDescriptorHandleForHeapStart();
 		auto srv_gpu1 = srv_gpu0; srv_gpu1.ptr += srv_inc;
 		auto srv_gpu2 = srv_gpu0; srv_gpu2.ptr += 2 * srv_inc;
+		auto srv_gpu3 = srv_gpu0; srv_gpu3.ptr += 3 * srv_inc;
+		v.cb_cursor = (v.cb_cursor + 1) % 3;
+		memcpy(v.cb_mapped + (size_t)v.cb_cursor * 512, &cb, sizeof(cb));
+		const D3D12_GPU_VIRTUAL_ADDRESS cb_va = v.cb->GetGPUVirtualAddress() + (UINT64)v.cb_cursor * 512;
 		const u32 rtv_inc = DX12Core::instance().device()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 		auto rtv0 = v.rtv_heap->GetCPUDescriptorHandleForHeapStart();
 		auto rtv1 = rtv0; rtv1.ptr += rtv_inc;
@@ -469,7 +537,8 @@ namespace vortex::graphics::dx12
 		m_command_list->SetPipelineState(m_ssao_pso.Get());
 		m_command_list->SetGraphicsRootDescriptorTable(0, srv_gpu0);
 		m_command_list->SetGraphicsRootDescriptorTable(2, srv_gpu2);
-		m_command_list->SetGraphicsRoot32BitConstants(1, sizeof(SsaoCB) / 4, &cb, 0);
+		m_command_list->SetGraphicsRootConstantBufferView(1, cb_va);
+		m_command_list->SetGraphicsRootDescriptorTable(3, srv_gpu3);
 		m_command_list->DrawInstanced(3, 1, 0, 0);
 
 		// Blur: raw AO -> blurred AO (the texture the scene pass samples at t10).
@@ -479,7 +548,8 @@ namespace vortex::graphics::dx12
 		m_command_list->SetPipelineState(m_ssao_blur_pso.Get());
 		m_command_list->SetGraphicsRootDescriptorTable(0, srv_gpu1);
 		m_command_list->SetGraphicsRootDescriptorTable(2, srv_gpu2);
-		m_command_list->SetGraphicsRoot32BitConstants(1, sizeof(SsaoCB) / 4, &cb, 0);
+		m_command_list->SetGraphicsRootConstantBufferView(1, cb_va);
+		m_command_list->SetGraphicsRootDescriptorTable(3, srv_gpu3);
 		m_command_list->DrawInstanced(3, 1, 0, 0);
 
 		transition(v.blur.Get(), v.blur_state, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);

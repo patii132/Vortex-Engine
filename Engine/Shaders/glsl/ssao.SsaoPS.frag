@@ -9,6 +9,7 @@ layout(location = 0) out vec4 o_color;
 
 layout(set = 2, binding = 0) uniform sampler2D u_depth;
 layout(set = 2, binding = 1) uniform sampler2D u_prev_color;   // the previous frame's opaque colour (LDR)
+layout(set = 2, binding = 2) uniform sampler2D u_csm;          // the sun's cascade atlas (depth as a plain texture) — the bounce's emitters
 
 layout(set = 3, binding = 0, std140) uniform SsaoCB
 {
@@ -25,6 +26,12 @@ layout(set = 3, binding = 0, std140) uniform SsaoCB
 	float scene_exposure;
 	float prev_valid;
 	float gi_radius;
+	// the bounce from the sun's shadow map (#257 step 2, a reflective shadow map read from depth alone) — appended @240
+	mat4  view_to_rsm;       // @240 view -> the bounce cascade's clip
+	mat4  rsm_to_view;       // @304 the bounce cascade's clip -> view
+	vec4  rsm_tile;          // @368 xy the cascade's tile offset in the atlas (uv), z the tile scale, w one atlas texel (uv)
+	vec4  rsm_sun_view;      // @384 xyz towards the sun in view space, w the gather radius in tile uv
+	vec4  rsm_flux;          // @400 rgb ground albedo x sun colour x intensity, w the gather radius (m); 0 = off
 } c;
 
 vec3 view_pos(vec2 uv)
@@ -109,6 +116,54 @@ void main()
 		gi *= c.gi_strength / float(DIRS);
 		float gl = dot(gi, vec3(0.2126, 0.7152, 0.0722));
 		gi = mix(vec3(gl), gi, 0.65);   // a bounce is never as saturated as the albedo squared suggests
+	}
+	// ---- the bounce from the sun's shadow map (#257 step 2): every point the sun sees is a Lambertian emitter of the ground's
+	// colour; a disk of them around the receiver in the cascade is gathered with the full geometric term, their normals from
+	// the map's own depth gradient. Off-screen sand lights the shaded floor and the trunks — what the screen trace cannot see.
+	if (c.gi_strength > 0.0 && c.rsm_flux.w > 0.0)
+	{
+		vec4 lp = c.view_to_rsm * vec4(P, 1.0);
+		if (lp.w > 0.001)
+		{
+			vec2 tuv = (lp.xy / lp.w) * vec2(0.5, -0.5) + 0.5;
+			if (tuv.x > 0.02 && tuv.x < 0.98 && tuv.y > 0.02 && tuv.y < 0.98)
+			{
+				vec3 L = c.rsm_sun_view.xyz;
+				float R = c.rsm_sun_view.w, Rm = c.rsm_flux.w;
+				const int K = 12;
+				float area = 3.14159265 * Rm * Rm / float(K);
+				float tx = c.rsm_tile.w / c.rsm_tile.z;   // one atlas texel in tile uv
+				vec3 E = vec3(0.0);
+				float ang = hash12(gl_FragCoord.xy * 1.7 + 3.1) * 6.2831853;
+				for (int k = 0; k < K; ++k)
+				{
+					float a = ang + float(k) * 2.3999632;
+					float r = R * sqrt((float(k) + 0.5) / float(K));
+					vec2 uvk = tuv + vec2(cos(a), sin(a)) * r;
+					vec2 auv = uvk * c.rsm_tile.z + c.rsm_tile.xy;
+					float dk = texture(u_csm, auv).r;
+					if (dk >= 0.9999) continue;
+					vec2 nk = uvk * vec2(2.0, -2.0) + vec2(-1.0, 1.0);
+					vec4 vx = c.rsm_to_view * vec4(nk, dk, 1.0);
+					vec3 X = vx.xyz / vx.w;
+					float dkx = texture(u_csm, auv + vec2(c.rsm_tile.w, 0.0)).r;
+					float dky = texture(u_csm, auv + vec2(0.0, c.rsm_tile.w)).r;
+					vec4 vxx = c.rsm_to_view * vec4(nk + vec2(2.0 * tx, 0.0), dkx, 1.0);
+					vec4 vxy = c.rsm_to_view * vec4(nk - vec2(0.0, 2.0 * tx), dky, 1.0);
+					vec3 Nk = cross(vxx.xyz / vxx.w - X, vxy.xyz / vxy.w - X);
+					float nl = dot(Nk, Nk);
+					if (nl < 1e-12) continue;
+					Nk *= inversesqrt(nl);
+					if (dot(Nk, L) < 0.0) Nk = -Nk;   // the sun sees it, so it faces the sun
+					vec3 w = X - P;
+					float d2 = max(dot(w, w), 0.25);
+					w *= inversesqrt(d2);
+					float g = max(dot(N, w), 0.0) * max(dot(Nk, -w), 0.0) * max(dot(Nk, L), 0.0);
+					E += g * (area / d2);
+				}
+				gi += c.rsm_flux.rgb * E * (c.gi_strength / 3.14159265);
+			}
+		}
 	}
 	o_color = vec4(sqrt(saturate(gi * 0.25)), ao);
 }
