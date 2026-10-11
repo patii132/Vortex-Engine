@@ -381,7 +381,7 @@ static inline float sample_spot_shadow(constant PerFrame& frame, constant LightB
 // The sun's shadow filter (Light ▸ Soft): softness <= 1 = the classic 3x3 box; above it a 16-tap Poisson disk of that
 // radius in shadow texels — a real penumbra under palms instead of a stair-stepped edge.
 constant float2 poisson16[16] = { float2(-0.94201624,-0.39906216), float2(0.94558609,-0.76890725), float2(-0.094184101,-0.92938870), float2(0.34495938,0.29387760), float2(-0.91588581,0.45771432), float2(-0.81544232,-0.87912464), float2(-0.38277543,0.27676845), float2(0.97484398,0.75648379), float2(0.44323325,-0.97511554), float2(0.53742981,-0.47373420), float2(-0.26496911,-0.41893023), float2(0.79197514,0.19090188), float2(-0.24188840,0.99706507), float2(-0.81409955,0.91437590), float2(0.19984126,0.78641367), float2(0.14383161,-0.14100790) };
-static inline float csm_pcf(depth2d<float> atlas, sampler smp, float2 suv, float depth, float atlas_texel, float softness)
+static inline float csm_pcf(depth2d<float> atlas, sampler smp, float2 suv, float depth, float atlas_texel, float softness, float zscale, float mpt)
 {
     float lit = 0.0;
     if (softness <= 1.01)
@@ -391,7 +391,22 @@ static inline float csm_pcf(depth2d<float> atlas, sampler smp, float2 suv, float
                 lit += atlas.sample_compare(smp, suv + float2((float)x, (float)y) * atlas_texel, depth);
         return lit / 9.0;
     }
-    float r = softness * atlas_texel;
+    // contact hardening (PCSS without a depth read): comparison taps at the receiver's depth minus 0 / 1 / 3 / 9 m over the
+    // widest penumbra tell how far behind the receiver the blockers sit; the Poisson radius grows with that distance — a
+    // trunk's shadow is sharp at its foot and soft where the crown throws it 10 m up. Softness caps the radius (texels).
+    const float tan_a = 0.035;   // the sun's angular radius, widened to 2 degrees as the big engines do
+    float rs = clamp(12.0 * tan_a / mpt, 1.0, softness) * atlas_texel;
+    float sh[4];
+    for (int l = 0; l < 4; ++l)
+    {
+        float k = (l == 0) ? 0.0 : (l == 1 ? 1.0 : (l == 2 ? 3.0 : 9.0));
+        float s = 0.0;
+        for (int i = 0; i < 4; ++i) s += atlas.sample_compare(smp, suv + poisson16[i * 4 + l] * rs, depth - k * zscale);
+        sh[l] = 1.0 - s * 0.25;
+    }
+    if (sh[0] < 0.02) return 1.0;   // nothing in the way anywhere in the search disk
+    float bd = (0.5 * (sh[0] + sh[1]) + (sh[1] + sh[2]) + 3.0 * (sh[2] + sh[3])) / max(sh[0], 0.05);   // the mean blocker distance (m)
+    float r = clamp(bd * tan_a / mpt, 1.0, softness) * atlas_texel;
     for (int i = 0; i < 16; ++i)
         lit += atlas.sample_compare(smp, suv + poisson16[i] * r, depth);
     return lit / 16.0;
@@ -416,7 +431,10 @@ static inline float sample_cascade_shadow(constant PerFrame& frame, constant Lig
         suv += float2((c & 1) != 0 ? 0.5 : 0.0, (c & 2) != 0 ? 0.5 : 0.0);
         float bias = lights.dir_shadow_params.y * (1.0 + (float)c) * (0.75 + 0.25 * max(lights.dir_shadow_params.w, 1.0));
         float atlas_texel = t * 0.5;
-        return mix(1.0, csm_pcf(atlas, smp, suv, ndc.z - bias, atlas_texel, lights.dir_shadow_params.w), saturate(lights.dir_shadow_params.x));
+        float4x4 M = lights.cascade_vp[c];
+        float zscale = length(float3(M[0][2], M[1][2], M[2][2]));                       // depth units per metre along the light
+        float mpt = 2.0 * t / max(length(float3(M[0][0], M[1][0], M[2][0])), 1e-6);   // metres per shadow texel in this cascade
+        return mix(1.0, csm_pcf(atlas, smp, suv, ndc.z - bias, atlas_texel, lights.dir_shadow_params.w, zscale, mpt), saturate(lights.dir_shadow_params.x));
     }
     return 1.0;
 }
@@ -606,7 +624,7 @@ fragment float4 PSMain(VSOut in [[stage_in]],
         float sun_shadow = sample_cascade_shadow(frame, lights, csm_shadow, csm_smp, in.world_pos);
         // leaves: the diffuse term wraps round the thin blade and the sun shines through it (translucency)
         float NdotLw = saturate((dot(N, L) + 0.4) / 1.4);
-        float3 trans = albedo * radiance * pow(saturate(dot(V, -L)), 3.0) * 0.35 * (1.0 - metallic);
+        float3 trans = albedo * radiance * (0.45 * saturate(-dot(N, L)) + 0.6 * pow(saturate(dot(V, -L)), 2.0)) * (1.0 - metallic);   // a leaf lit from behind glows (diffuse transmission) and a forward lobe towards the sun
         Lo += ((kD * albedo / PI) * radiance * NdotLw + spec * radiance * NdotL + trans / PI) * sun_shadow;
     }
 

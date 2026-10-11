@@ -2731,7 +2731,7 @@ namespace Editor.Core.Services
                                 light.ShadowStrength,
                                 light.ShadowBias * 0.016f);
                             // Soft = a 16-tap Poisson disk of 4 shadow texels (a penumbra), Hard = the 3x3 box
-                            VortexAPI.SetDirectionalShadowSoftnessTexels(light.ShadowType == ECS.Components.Lighting.ShadowType.Soft ? 4.0f : 1.0f);
+                            VortexAPI.SetDirectionalShadowSoftnessTexels(light.ShadowType == ECS.Components.Lighting.ShadowType.Soft ? 10.0f : 1.0f);   // the cap of the contact-hardening filter: the radius grows with the blocker distance, so a wide cap keeps contact shadows sharp
                             break;
 
                         case ECS.Components.Lighting.LightType.Point:

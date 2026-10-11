@@ -107,13 +107,13 @@ namespace VortexEditor.Shell
             // the late afternoon of the syferfontein pure sky (18.2° up, azimuth 216° — tools/hdri-analyze.py): long palm shadows,
             // the sun's glow in the haze; the goegap noon stays the "noon" weather preset
             sun.Transform.LocalRotation = new Vector3(18.19f, -144.05f, 0f);
-            sun.AddComponentDirect(new Light(sun, LightType.Directional) { Intensity = 5.5f, ColorR = 1f, ColorG = 0.95f, ColorB = 0.85f, ShadowType = ShadowType.Soft });   // a late sun, but not orange: the sand must stay golden, not pink
+            sun.AddComponentDirect(new Light(sun, LightType.Directional) { Intensity = 8f, ColorR = 1f, ColorG = 0.90f, ColorB = 0.72f, ShadowType = ShadowType.Soft });   // at 18° a flat floor gets only 0.31 of the sun — the ambient has to stay well under that or the shade is as bright as the sun (it was, at 5.5 / 0.9). A late sun, but not orange: the sand must stay golden, not pink
 
             // ---- the sky: the desert HDRI; the gradient colours are its environment (reflections, the lakes' sky) ----
             var sky = scene.CreateEntity("Sky");
             sky.AddComponentDirect(new Skybox(sky)
             {
-                IsEnabled = true, SkyboxType = SkyboxType.Texture, TexturePath = "Assets/Skies/syferfontein_18d_clear_puresky_2k.hdr", Exposure = 1.0f, AmbientIntensity = 0.9f,
+                IsEnabled = true, SkyboxType = SkyboxType.Texture, TexturePath = "Assets/Skies/syferfontein_18d_clear_puresky_2k.hdr", Exposure = 0.5f, AmbientIntensity = 0.45f,
                 TopColorR = 0.25f, TopColorG = 0.42f, TopColorB = 0.85f,
                 HorizonColorR = 0.95f, HorizonColorG = 0.88f, HorizonColorB = 0.75f,
                 BottomColorR = 0.60f, BottomColorG = 0.50f, BottomColorB = 0.35f
@@ -251,17 +251,17 @@ namespace VortexEditor.Shell
             var st = scene.Settings;
             st.Tonemapper = 1;         // PBR Neutral: the sand stays orange, the sky blue — the ACES fit washed both towards white
             st.AntiAliasEnabled = true;   // FXAA: the fronds and the ripples stop flickering
-            st.BounceStrength = 1.0f; st.BounceR = 0.60f; st.BounceG = 0.42f; st.BounceB = 0.26f;   // the sand's warm bounce into the shadows (the reference's shadows are orange, not grey)
-            st.SceneExposure = 2.2f;   // stops before the tonemapper: the low sun needs more aperture than noon; 2.6 clipped the crowns and the far dunes to white
-            st.FogEnabled = true; st.FogDensity = 0.0010f; st.FogHeightY = -4f; st.FogHeightFalloff = 0.012f;
-            st.FogR = 0.60f; st.FogG = 0.64f; st.FogB = 0.72f; st.FogSunGlow = 0.5f;   // the reference's far dunes fade to a neutral, slightly cool white — a warm haze turned them salmon
-            st.GradeEnabled = true; st.Exposure = 0f; st.Contrast = 1.05f; st.Saturation = 1.0f; st.Temperature = 0.0f; st.Tint = 0.0f;   // the reference is NOT saturated: the sand golden, the palms olive, the shadows warm
+            st.BounceStrength = 1.2f; st.BounceR = 0.62f; st.BounceG = 0.40f; st.BounceB = 0.20f;   // the sand's warm bounce into the shadows: the reference's shade is orange-brown; at 1.0 the sky's blue won and the grove floor turned grey
+            st.SceneExposure = 1.7f;   // stops before the tonemapper: the low sun needs more aperture than noon; 2.2 pushed the sunlit sand into the tonemapper's shoulder (pale pink), 2.6 clipped the crowns
+            st.FogEnabled = true; st.FogDensity = 0.00028f;   // at 0.0010 the air swallowed 63 % of a dune 1 km out — the reference's dunes are saturated to the horizon st.FogHeightY = -4f; st.FogHeightFalloff = 0.012f;
+            st.FogR = 0.70f; st.FogG = 0.62f; st.FogB = 0.52f; st.FogSunGlow = 0.2f;   // the reference's distance is peach, not blue-white   // the reference's far dunes fade to a neutral, slightly cool white — a warm haze turned them salmon
+            st.GradeEnabled = true; st.Exposure = 0f; st.Contrast = 1.12f; st.Saturation = 1.06f; st.Temperature = 0.0f; st.Tint = 0.0f;   // the reference is NOT saturated: the sand golden, the palms olive, the shadows warm
             st.AoEnabled = true; st.AoRadius = 0.8f; st.AoIntensity = 0.9f;
             st.GiEnabled = true; st.GiStrength = 0.6f; st.GiRadius = 3.0f;   // screen-space GI: the sand's light on the trunks and the undergrowth
-            st.BloomEnabled = true; st.BloomThreshold = 0.95f; st.BloomIntensity = 0.3f; st.BloomScatter = 0.6f;
+            st.BloomEnabled = true; st.BloomThreshold = 0.95f; st.BloomIntensity = 0.18f; st.BloomScatter = 0.6f;   // 0.3 spread the sun into a white sheet
             // sun shafts through the palms: a thin volumetric haze marched 160 m, strongly forward-scattering
             st.VolumetricEnabled = true; st.VolumetricDensity = 0.0025f; st.VolumetricAnisotropy = 0.75f; st.VolumetricDistance = 120f;
-            st.VolumetricNoise = 0.25f; st.VolumetricNoiseScale = 12f; st.VolumetricNoiseSpeed = 0.2f; st.VolumetricSun = 1.6f;
+            st.VolumetricNoise = 0.25f; st.VolumetricNoiseScale = 12f; st.VolumetricNoiseSpeed = 0.2f; st.VolumetricSun = 0.8f;
             st.VolumetricLights = 0f; st.VolumetricAmbient = 0.04f; st.VolumetricSteps = 20; st.VolumetricShadows = true;
             st.Apply();
 
@@ -327,6 +327,7 @@ namespace VortexEditor.Shell
             float warp = 28f * Fbm(v * 0.011f + 4f, u * 0.006f + 8f, 3);
             float phase = (u + warp) / 96f;
             float f = phase - (float)Math.Floor(phase);
+            f = 1f - f;   // the long windward slopes face the sun (it stands in the north-east), the slip faces drop away from it into shadow — side-lit crests instead of a flat sheet
             // a long windward slope (72 % of the wavelength) and a short steep slip face: the crest reads as an edge, not a hump
             float crest = f < 0.72f ? Smooth(f / 0.72f) : 1f - Smooth((f - 0.72f) / 0.28f);
             float amp = 15f + 9f * Fbm(x * 0.004f + 7f, z * 0.004f + 3f, 3);
@@ -351,6 +352,12 @@ namespace VortexEditor.Shell
             float sum = sand + damp + rock + grass; if (sum < 1e-4f) { sand = 1f; sum = 1f; }
             s[o] = (byte)Math.Round(255f * sand / sum); s[o + 1] = (byte)Math.Round(255f * damp / sum);
             s[o + 2] = (byte)Math.Round(255f * rock / sum); s[o + 3] = (byte)Math.Round(255f * grass / sum);
+        }
+
+        private static bool TooCloseToAnyPalm(FoliageData data, NVec3 pos, float spacing)
+        {
+            foreach (var pl in data.Layers) if (pl.TypeName.StartsWith("Palm") && pl.AnyWithin(pos, spacing)) return true;
+            return false;
         }
 
         /// <summary>0 at a lake's centre, 1 at the oasis' edge, larger outside.</summary>
@@ -457,6 +464,9 @@ namespace VortexEditor.Shell
             l.Add(T("Stones", "Assets/Models/Rocks/namaqualand_rocks_01/namaqualand_rocks_01_lod.gltf", 1.5f, 4f, 1.3f, 90f, 30f, 0f, 1f, 0, 0f, 0f, true, 60f, 0.02f));
             l.Add(T("Pebbles", "Assets/Models/Rocks/namaqualand_stones_01/namaqualand_stones_01_lod.gltf", 1.2f, 2.5f, 1.3f, 80f, 30f, 0f, 1f, 0, 0f, 0f, true, 60f, 0.01f));
             l.Add(T("Flat rocks", "Assets/Models/Rocks/sand_rocks_small_01/sand_rocks_small_01_lod.gltf", 0.8f, 1.6f, 9f, 260f, 0f, 0f, 1f, 0, 0f, 0f, true, 50f, 0.25f));
+            // the litter of the groves: dead fronds on the sand (tools/palm-gen.py --litter)
+            l.Add(T("Palm litter", "Assets/Models/Palms/palm_litter_a/palm_litter_a.gltf", 0.7f, 1.2f, 1.5f, 110f, 45f, 0f, 0.3f, 0, 0f, 0f, true, 50f, 0.0f));
+            l.Add(T("Palm litter pile", "Assets/Models/Palms/palm_litter_b/palm_litter_b.gltf", 0.7f, 1.1f, 3f, 110f, 45f, 0f, 0.3f, 0, 0f, 0f, true, 50f, 0.0f));
             l.Add(T("Rock formation", "Assets/Models/Rocks/coast_rocks_02/coast_rocks_02_lod.gltf", 0.3f, 0.45f, 40f, 1200f, 0f, 0f, 1f, 2, 0f, 0f, false, 80f, 1.5f));
             foreach (var t in l) t.Cutout = !(t.Name.StartsWith("Boulder") || t.Name == "Cliff" || t.Name == "Stones" || t.Name == "Pebbles" || t.Name == "Flat rocks" || t.Name == "Rock formation" || t.Name == "Dead trunk");   // rocks and bare wood are opaque
             return l;
@@ -468,7 +478,7 @@ namespace VortexEditor.Shell
         {
             var specs = new List<Spec>();
             float ox0 = -150f, oz0 = -140f, ox1 = 170f, oz1 = 130f;   // the oasis rectangle
-            Func<float, float, float> grove = (x, z) => Clamp01(0.55f + 0.6f * Fbm(x * 0.025f + 3f, z * 0.025f + 5f, 3));
+            Func<float, float, float> grove = (x, z) => Clamp01(0.40f + 0.8f * Fbm(x * 0.025f + 3f, z * 0.025f + 5f, 3));   // groves and real clearings: the reference's sunlit sand between the trunks
             // palms: a dense ring from the water line to ~10 m up, thinning outwards; palm groves beyond the ring
             for (int i = 0; i < 6; i++)
             {
@@ -490,8 +500,8 @@ namespace VortexEditor.Shell
                     hw < 0.8f || hw > 14f || ny < 0.85f || Proximity(x, z) > 1.2f ? 0f : 0.45f * grove(x + 50f, z - 30f) });
             }
             // the undergrowth of the groves: shrubs thick under the palms, thinning into the desert
-            specs.Add(new Spec { Type = types[9], Candidates = 1400, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.75f : 0.07f) });
-            specs.Add(new Spec { Type = types[10], Candidates = 1600, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.75f : 0.06f) });
+            specs.Add(new Spec { Type = types[9], Candidates = 5000, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.75f : 0.07f) });
+            specs.Add(new Spec { Type = types[10], Candidates = 6000, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.75f : 0.06f) });
             specs.Add(new Spec { Type = types[11], Candidates = 2600, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.4f || ny < 0.75f ? 0f : (Proximity(x, z) < 1.4f ? 0.7f : 0.12f) * grove(x * 1.5f, z * 1.5f) });
             specs.Add(new Spec { Type = types[12], Candidates = 1100, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.6f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.55f : 0.08f) });
             // dead fronds and leaves on the grove floor, stones and pebbles along the water line (the reference's shore)
@@ -517,6 +527,9 @@ namespace VortexEditor.Shell
             }
             specs.Add(new Spec { Type = types[23], Candidates = 700, X0 = -256f, Z0 = -230f, X1 = 256f, Z1 = -140f, Prob = (x, z, hw, ny) => z < -215f || z > -160f ? 0f : 0.4f });
             specs.Add(new Spec { Type = types[24], Candidates = 9000, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.3f ? 0f : 0.3f });
+            // dead fronds under the palms, a few blown out into the sand
+            specs.Add(new Spec { Type = types[28], Candidates = 6000, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.35f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.25f ? 0.6f * grove(x, z) : 0.04f) });
+            specs.Add(new Spec { Type = types[29], Candidates = 1500, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.35f || ny < 0.8f || Proximity(x, z) > 1.2f ? 0f : 0.35f * grove(x, z) });
             specs.Add(new Spec { Type = types[25], Candidates = 9000, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.3f ? 0f : 0.3f });
             specs.Add(new Spec { Type = types[26], Candidates = 500, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.8f || ny < 0.9f ? 0f : (Proximity(x, z) > 1.2f ? 0.25f : 0.05f) });
             specs.Add(new Spec { Type = types[27], Candidates = 60, X0 = -230f, Z0 = -120f, X1 = 230f, Z1 = 230f, Prob = (x, z, hw, ny) => hw < 6f || Proximity(x, z) < 1.6f ? 0f : 0.5f });
@@ -538,6 +551,7 @@ namespace VortexEditor.Shell
                     if (p <= 0f || rng.NextDouble() >= p) continue;
                     var pos = new NVec3(x, h, z);
                     if (s.Type.MinSpacing > 0f && layer.AnyWithin(pos, s.Type.MinSpacing)) continue;
+                    if (s.Type.Name.StartsWith("Palm") && TooCloseToAnyPalm(data, pos, 6.5f)) continue;   // across the palm layers: the reference's groves leave sunlit floor between the trunks
                     float scale = s.Type.MinScale + (float)rng.NextDouble() * (s.Type.MaxScale - s.Type.MinScale);
                     float yaw = (float)(rng.NextDouble() * 360.0), tilt = (float)(rng.NextDouble() * s.Type.MaxTilt), tiltDir = (float)(rng.NextDouble() * 360.0);
                     var rot = FoliageData.Orientation(n, s.Type.AlignToNormal, yaw, tilt, tiltDir);
@@ -583,7 +597,7 @@ namespace VortexEditor.Shell
                 if (gridWas) EditorViewportService.Instance.ToggleGrid();   // no editor grid across the sky in the pictures
                 EditorViewportService.Instance.AreGizmosVisible = false;    // no light / particle icons either
                 // a fresh editor loads the 28 models after its first frames: wait until the vegetation draws
-                Look(cam, At(ter, 205f, 150f, 42f), new Vector3(0f, WaterLevel - 2f, -8f));
+                Look(cam, At(ter, -235f, 125f, 48f), new Vector3(45f, WaterLevel, -55f));   // from the west, the sun to the left: the dunes side-lit (from the north-east it stood behind the camera and flattened everything)
                 int waited = 0;
                 for (; waited < 80 && FoliageService.LastInstancesDrawn == 0; waited++) { EditorViewportSession.RequestResubmit(); await Task.Delay(400); }
                 if (FoliageService.LastInstancesDrawn == 0)
@@ -603,7 +617,7 @@ namespace VortexEditor.Shell
                 await SmokeRegistry.Settle(2500);
                 await CameraSkySmoke.Sample("oasis_aerial.bmp", 0.5, 0.5);
                 // the reference view: from the dunes east of the lakes, the sun behind the camera, both lakes and the palms ahead
-                Look(cam, At(ter, 205f, 150f, 42f), new Vector3(0f, WaterLevel - 2f, -8f));
+                Look(cam, At(ter, -235f, 125f, 48f), new Vector3(45f, WaterLevel, -55f));   // from the west, the sun to the left: the dunes side-lit (from the north-east it stood behind the camera and flattened everything)
                 await SmokeRegistry.Settle(1500);
                 await CameraSkySmoke.Sample("oasis_wide.bmp", 0.5, 0.5);
                 // at the west lake's south shore, eye height, across the water to the palms on the far bank
@@ -624,8 +638,30 @@ namespace VortexEditor.Shell
                     }
                     float tl = (float)Math.Sqrt(toSunDir.X * toSunDir.X + toSunDir.Z * toSunDir.Z); if (tl < 1e-3f) tl = 1f;
                     toSunDir = new Vector3(toSunDir.X / tl, 0f, toSunDir.Z / tl);
-                    var eye = At(ter, -96f, 6f, 1.6f);
-                    Look(cam, eye, new Vector3(eye.X + toSunDir.X * 30f, eye.Y + 4.5f, eye.Z + toSunDir.Z * 30f));
+                    // the densest spot of the palm belt: the palm with the most palms within 20 m
+                    float gx = -96f, gz = 6f;
+                    {
+                        var fol3 = TemplateSetupSmoke.Find(scene, e => e.GetComponent<FoliageComponent>() != null);
+                        FoliageData fd3;
+                        if (fol3 != null && FoliageService.TryGetData(fol3, out fd3))
+                        {
+                            var pts = new List<Vector3>();
+                            foreach (var ly in fd3.Layers) if (ly.TypeName.StartsWith("Palm")) for (int k = 0; k < ly.Count; k++) pts.Add(new Vector3(ly.Instances[k].Position.X, ly.Instances[k].Position.Y, ly.Instances[k].Position.Z));
+                            int best = -1, bestN = -1;
+                            for (int k = 0; k < pts.Count; k += 5)
+                            {
+                                int cnt = 0;
+                                for (int q = 0; q < pts.Count; q++) { float ddx = pts[q].X - pts[k].X, ddz = pts[q].Z - pts[k].Z; if (ddx * ddx + ddz * ddz < 400f) cnt++; }
+                                if (cnt > bestN) { bestN = cnt; best = k; }
+                            }
+                            if (best >= 0) { gx = pts[best].X; gz = pts[best].Z; log.Log("oasis grove: densest spot (" + gx.ToString("0") + ", " + gz.ToString("0") + "), " + bestN + " palms within 20 m"); }
+                        }
+                    }
+                    // look 50° off the sun: the light rakes across the frame, the trunks throw their shadows towards the camera's side
+                    const float rot = 28f * (float)Math.PI / 180f;   // the sun in the frame's upper corner: shafts, backlit fronds, the shadows raking towards the camera
+                    var viewDir = new Vector3(toSunDir.X * (float)Math.Cos(rot) - toSunDir.Z * (float)Math.Sin(rot), 0f, toSunDir.X * (float)Math.Sin(rot) + toSunDir.Z * (float)Math.Cos(rot));
+                    var eye = At(ter, gx - viewDir.X * 3f + viewDir.Z * 2.5f, gz - viewDir.Z * 3f - viewDir.X * 2.5f, 1.6f);
+                    Look(cam, eye, new Vector3(eye.X + viewDir.X * 30f, eye.Y + 6.5f, eye.Z + viewDir.Z * 30f));
                     await SmokeRegistry.Settle(1200);
                     await CameraSkySmoke.Sample("oasis_grove.bmp", 0.5, 0.5);
                 }
@@ -694,7 +730,7 @@ namespace VortexEditor.Shell
                     await SmokeRegistry.Settle(3500);
                     await CameraSkySmoke.Sample("oasis_sandstorm.bmp", 0.5, 0.5);
                     VortexEditor.Claude.Tools.EnvironmentTools.ApplyWeather(scene, dusk, 1f);
-                    Look(cam, At(ter, 205f, 150f, 42f), new Vector3(0f, WaterLevel - 2f, -8f));
+                    Look(cam, At(ter, -235f, 125f, 48f), new Vector3(45f, WaterLevel, -55f));   // from the west, the sun to the left: the dunes side-lit (from the north-east it stood behind the camera and flattened everything)
                     await SmokeRegistry.Settle(1200);
                     await CameraSkySmoke.Sample("oasis_dusk.bmp", 0.5, 0.5);
                     VortexEditor.Claude.Tools.EnvironmentTools.ApplyWeather(scene, clear, 1f);
@@ -818,7 +854,7 @@ namespace VortexEditor.Shell
             var far = TemplateSetupSmoke.Find(scene, e => e.Name == "Far Dunes");
             var lakes = new List<GameEntity>();
             foreach (var e in scene.Entities) if (e != null && e.GetComponent<WaterComponent>() != null) lakes.Add(e);
-            Look(cam, At(ter, 205f, 150f, 42f), new Vector3(0f, WaterLevel - 2f, -8f));
+            Look(cam, At(ter, -235f, 125f, 48f), new Vector3(45f, WaterLevel, -55f));   // from the west, the sun to the left: the dunes side-lit (from the north-east it stood behind the camera and flattened everything)
             var sb = new System.Text.StringBuilder();
             async Task<int> Read(string what)
             {

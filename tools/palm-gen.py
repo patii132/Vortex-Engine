@@ -27,6 +27,7 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--name", default=None)
     ap.add_argument("--fern", action="store_true", help="a fern / cycad clump instead of a palm: fronds from the ground, no crown rings")
+    ap.add_argument("--litter", action="store_true", help="one dead frond lying on the ground (the litter under a grove); --fronds = how many in the pile")
     a = ap.parse_args()
     rnd = random.Random(a.seed)
 
@@ -44,7 +45,7 @@ def main():
         return (math.cos(lean_dir) * a.lean * s, H * t, math.sin(lean_dir) * a.lean * s)
     rings, segs = 14, 14
     ring_idx = []
-    for r in range(rings + 1):
+    for r in range(0 if a.litter else rings + 1):
         t = r / rings
         c = axis(t)
         rad = a.radius * (1.0 - 0.28 * t) * (1.0 + 0.12 * math.sin(t * 9.0 + 1.0))   # a little taper, slight bulges
@@ -57,12 +58,12 @@ def main():
             # the bark tiles every 1.6 m along the trunk (u 0..0.5 = the atlas' trunk half)
             row.append(vertex(p, (nx, 0.0, nz), (0.5 * s / segs, (H * t) / 1.6)))
         ring_idx.append(row)
-    for r in range(rings):
+    for r in range(0 if a.litter else rings):
         for s in range(segs):
             i0, i1, i2, i3 = ring_idx[r][s], ring_idx[r][s + 1], ring_idx[r + 1][s + 1], ring_idx[r + 1][s]
             prims["trunk"] += [i0, i2, i1, i0, i3, i2]
     # caps: a closed tube keeps its end rings under the engine's LOD decimation (an open boundary collapsed and the base floated)
-    for r, ny in ((0, -1.0), (rings, 1.0)):
+    for r, ny in (() if a.litter else ((0, -1.0), (rings, 1.0))):
         c = axis(r / rings)
         centre = vertex((c[0], c[1] - 0.05 if r == 0 else c[1], c[2]), (0.0, ny, 0.0), (0.25, 0.5))
         for s in range(segs):
@@ -115,6 +116,15 @@ def main():
 
     L, W = a.frond_length, a.frond_width
     n = a.fronds
+    if a.litter:
+        # dead fronds on the sand: flat, a little curl at the tip, each turned its own way; the pile's centre is the origin
+        for i in range(n):
+            yaw = rnd.uniform(0, 2 * math.pi)
+            w = W * rnd.uniform(0.9, 1.1)
+            lift = math.sin(0.3) * w * 0.5 + 0.015 + 0.02 * i   # the folded edges touch the sand, the rachis rides above it
+            base = (rnd.uniform(-0.3, 0.3) * (n > 1), lift, rnd.uniform(-0.3, 0.3) * (n > 1))
+            frond(base, yaw, 0.03 + rnd.uniform(0.0, 0.04), -0.06 + rnd.uniform(-0.03, 0.03), L * rnd.uniform(0.85, 1.1), w, "dead", fold=0.3)
+        n = 0
     if a.fern:
         # a cycad / fern clump: fronds from a short stub in a bowl — the undergrowth of the reference
         for i in range(n):
