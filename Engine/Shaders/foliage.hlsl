@@ -223,6 +223,28 @@ float SampleSpotShadow(float3 worldPos, int slot, float strength, float bias)
 // Directional cascade shadow (#24): try cascades near -> far and take the FIRST whose ortho crop
 // contains the point (tight snapped crops make projection-inside more robust than distance-select at
 // the boundaries). 3x3 hardware-PCF kernel; per-cascade bias grows with the coarser world-per-texel.
+// The sun's shadow filter (Light ▸ Soft): softness <= 1 = the classic 3x3 box; above it a 16-tap Poisson disk of that
+// radius in shadow texels — palm shadows on sand get a real penumbra instead of a stair-stepped edge.
+static const float2 PoissonDisk16[16] = { float2(-0.94201624,-0.39906216), float2(0.94558609,-0.76890725), float2(-0.094184101,-0.92938870), float2(0.34495938,0.29387760), float2(-0.91588581,0.45771432), float2(-0.81544232,-0.87912464), float2(-0.38277543,0.27676845), float2(0.97484398,0.75648379), float2(0.44323325,-0.97511554), float2(0.53742981,-0.47373420), float2(-0.26496911,-0.41893023), float2(0.79197514,0.19090188), float2(-0.24188840,0.99706507), float2(-0.81409955,0.91437590), float2(0.19984126,0.78641367), float2(0.14383161,-0.14100790) };
+float CsmPcf(float2 suv, float depth, float atlasTexel, float softness)
+{
+    float lit = 0.0;
+    if (softness <= 1.01)
+    {
+        [unroll]
+        for (int y = -1; y <= 1; ++y)
+            [unroll]
+            for (int x = -1; x <= 1; ++x)
+                lit += CsmShadowMap.SampleCmpLevelZero(ShadowSampler, suv + float2((float)x, (float)y) * atlasTexel, depth);
+        return lit / 9.0;
+    }
+    float r = softness * atlasTexel;
+    [unroll]
+    for (int i = 0; i < 16; ++i)
+        lit += CsmShadowMap.SampleCmpLevelZero(ShadowSampler, suv + PoissonDisk16[i] * r, depth);
+    return lit / 16.0;
+}
+
 float SampleCascadeShadow(float3 worldPos)
 {
     int count = (int)DirShadowParams.z;
@@ -242,19 +264,13 @@ float SampleCascadeShadow(float3 worldPos)
             continue;
 
         // Map into tile c of the 2x2 atlas; keep the whole 3x3 kernel inside the tile.
-        suv = clamp(suv, ShadowMapTexel * 1.5, 1.0 - ShadowMapTexel * 1.5) * 0.5;
+        float guard = ShadowMapTexel * (max(DirShadowParams.w, 1.0) + 0.5);   // the whole filter stays inside the tile
+        suv = clamp(suv, guard, 1.0 - guard) * 0.5;
         suv += float2((c & 1) != 0 ? 0.5 : 0.0, (c & 2) != 0 ? 0.5 : 0.0);
 
-        float bias = DirShadowParams.y * (1.0 + (float)c);   // coarser cascade -> more world per texel
+        float bias = DirShadowParams.y * (1.0 + (float)c) * (0.75 + 0.25 * max(DirShadowParams.w, 1.0));   // a wider filter needs more bias on slopes   // coarser cascade -> more world per texel
         float atlasTexel = ShadowMapTexel * 0.5;             // tile texel -> atlas UV
-        float lit = 0.0;
-        [unroll]
-        for (int y = -1; y <= 1; ++y)
-            [unroll]
-            for (int x = -1; x <= 1; ++x)
-                lit += CsmShadowMap.SampleCmpLevelZero(ShadowSampler,
-                    suv + float2((float)x, (float)y) * atlasTexel, ndc.z - bias);
-        return lerp(1.0, lit / 9.0, saturate(DirShadowParams.x));
+        return lerp(1.0, CsmPcf(suv, ndc.z - bias, atlasTexel, DirShadowParams.w), saturate(DirShadowParams.x));
     }
     return 1.0;   // beyond every cascade -> lit
 }

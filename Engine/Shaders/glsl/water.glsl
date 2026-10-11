@@ -97,6 +97,25 @@ vec3 apply_fog(vec3 color, vec3 world_pos)
 	return mix(color, fog_inscatter(world_pos), saturate(f));
 }
 
+// The sun's shadow filter (Light ▸ Soft): softness <= 1 = the classic 3x3 box; above it a 16-tap Poisson disk of that
+// radius in shadow texels — a real penumbra under palms instead of a stair-stepped edge.
+const vec2 poisson16[16] = vec2[16](vec2(-0.94201624,-0.39906216), vec2(0.94558609,-0.76890725), vec2(-0.094184101,-0.92938870), vec2(0.34495938,0.29387760), vec2(-0.91588581,0.45771432), vec2(-0.81544232,-0.87912464), vec2(-0.38277543,0.27676845), vec2(0.97484398,0.75648379), vec2(0.44323325,-0.97511554), vec2(0.53742981,-0.47373420), vec2(-0.26496911,-0.41893023), vec2(0.79197514,0.19090188), vec2(-0.24188840,0.99706507), vec2(-0.81409955,0.91437590), vec2(0.19984126,0.78641367), vec2(0.14383161,-0.14100790));
+float csm_pcf(vec2 suv, float depth, float atlas_texel, float softness)
+{
+	float lit = 0.0;
+	if (softness <= 1.01)
+	{
+		for (int y = -1; y <= 1; ++y)
+			for (int x = -1; x <= 1; ++x)
+				lit += texture(u_csm_shadow, vec3(suv + vec2(float(x), float(y)) * atlas_texel, depth));
+		return lit / 9.0;
+	}
+	float r = softness * atlas_texel;
+	for (int i = 0; i < 16; ++i)
+		lit += texture(u_csm_shadow, vec3(suv + poisson16[i] * r, depth));
+	return lit / 16.0;
+}
+
 float sample_cascade_shadow(vec3 wp)
 {
 	int count = int(lights.dir_shadow_params.z);
@@ -110,15 +129,12 @@ float sample_cascade_shadow(vec3 wp)
 		vec2 suv = ndc.xy * vec2(0.5, -0.5) + 0.5;
 		if (min(suv.x, suv.y) < 0.02 || max(suv.x, suv.y) > 0.98 || ndc.z > 1.0 || ndc.z < 0.0) continue;
 		float t = frame.shadow_map_texel;
-		suv = clamp(suv, vec2(t * 1.5), vec2(1.0 - t * 1.5)) * 0.5;
+		float guard = t * (max(lights.dir_shadow_params.w, 1.0) + 0.5);   // the whole filter stays inside the tile
+		suv = clamp(suv, vec2(guard), vec2(1.0 - guard)) * 0.5;
 		suv += vec2((c & 1) != 0 ? 0.5 : 0.0, (c & 2) != 0 ? 0.5 : 0.0);
-		float bias = lights.dir_shadow_params.y * (1.0 + float(c));
+		float bias = lights.dir_shadow_params.y * (1.0 + float(c)) * (0.75 + 0.25 * max(lights.dir_shadow_params.w, 1.0));
 		float atlas_texel = t * 0.5;
-		float lit = 0.0;
-		for (int y = -1; y <= 1; ++y)
-			for (int x = -1; x <= 1; ++x)
-				lit += texture(u_csm_shadow, vec3(suv + vec2(float(x), float(y)) * atlas_texel, ndc.z - bias));
-		return mix(1.0, lit / 9.0, saturate(lights.dir_shadow_params.x));
+		return mix(1.0, csm_pcf(suv, ndc.z - bias, atlas_texel, lights.dir_shadow_params.w), saturate(lights.dir_shadow_params.x));
 	}
 	return 1.0;
 }

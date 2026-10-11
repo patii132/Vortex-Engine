@@ -104,17 +104,19 @@ namespace VortexEditor.Shell
             float sunYaw, sunPitch;
             TransformMath.LookAngles(new Vector3(0f, 0f, 0f), new Vector3(-toSun.X, -toSun.Y, -toSun.Z), out sunYaw, out sunPitch);
             var sun = scene.CreateEntity("Sun");
-            sun.Transform.LocalRotation = new Vector3(sunPitch, sunYaw, 0f);
-            sun.AddComponentDirect(new Light(sun, LightType.Directional) { Intensity = 5.5f, ColorR = 1f, ColorG = 0.93f, ColorB = 0.82f, ShadowType = ShadowType.Soft });
+            // the late afternoon of the syferfontein pure sky (18.2° up, azimuth 216° — tools/hdri-analyze.py): long palm shadows,
+            // the sun's glow in the haze; the goegap noon stays the "noon" weather preset
+            sun.Transform.LocalRotation = new Vector3(18.19f, -144.05f, 0f);
+            sun.AddComponentDirect(new Light(sun, LightType.Directional) { Intensity = 5.0f, ColorR = 1f, ColorG = 0.90f, ColorB = 0.70f, ShadowType = ShadowType.Soft });
 
             // ---- the sky: the desert HDRI; the gradient colours are its environment (reflections, the lakes' sky) ----
             var sky = scene.CreateEntity("Sky");
             sky.AddComponentDirect(new Skybox(sky)
             {
-                IsEnabled = true, SkyboxType = SkyboxType.Texture, TexturePath = "Assets/Skies/goegap_2k.hdr", Exposure = 1.0f, AmbientIntensity = 1.0f,
-                TopColorR = 0.28f, TopColorG = 0.48f, TopColorB = 0.9f,
-                HorizonColorR = 0.82f, HorizonColorG = 0.82f, HorizonColorB = 0.8f,
-                BottomColorR = 0.62f, BottomColorG = 0.49f, BottomColorB = 0.33f
+                IsEnabled = true, SkyboxType = SkyboxType.Texture, TexturePath = "Assets/Skies/syferfontein_18d_clear_puresky_2k.hdr", Exposure = 1.0f, AmbientIntensity = 1.25f,
+                TopColorR = 0.25f, TopColorG = 0.42f, TopColorB = 0.85f,
+                HorizonColorR = 0.95f, HorizonColorG = 0.88f, HorizonColorB = 0.75f,
+                BottomColorR = 0.60f, BottomColorG = 0.50f, BottomColorB = 0.35f
             });
 
             // ---- the terrain ----
@@ -245,13 +247,16 @@ namespace VortexEditor.Shell
             // ---- the air: warm haze that thins with height, a touch of bloom and AO, no vignette ----
             var st = scene.Settings;
             st.Tonemapper = 1;         // PBR Neutral: the sand stays orange, the sky blue — the ACES fit washed both towards white
-            st.SceneExposure = 1.7f;   // stops before the tonemapper: a sunlit desert (the sand reads bright, the shadows sky-lit)
-            st.FogEnabled = true; st.FogDensity = 0.0011f; st.FogHeightY = -4f; st.FogHeightFalloff = 0.012f;
-            st.FogR = 0.40f; st.FogG = 0.43f; st.FogB = 0.50f; st.FogSunGlow = 0.45f;   // the horizon's hazy sky, warming towards the sun
+            st.SceneExposure = 2.6f;   // stops before the tonemapper: the low sun needs more aperture than noon (the sand stays bright, the shadows sky-lit)
+            st.FogEnabled = true; st.FogDensity = 0.0007f; st.FogHeightY = -4f; st.FogHeightFalloff = 0.012f;
+            st.FogR = 0.52f; st.FogG = 0.50f; st.FogB = 0.50f; st.FogSunGlow = 0.6f;   // the warm late-afternoon haze, glowing towards the low sun
             st.GradeEnabled = true; st.Exposure = 0f; st.Contrast = 1.08f; st.Saturation = 1.15f; st.Temperature = 0.08f; st.Tint = 0.0f;
             st.AoEnabled = true; st.AoRadius = 0.8f; st.AoIntensity = 0.9f;
             st.BloomEnabled = true; st.BloomThreshold = 0.95f; st.BloomIntensity = 0.3f; st.BloomScatter = 0.6f;
-            st.VolumetricEnabled = false;
+            // sun shafts through the palms: a thin volumetric haze marched 160 m, strongly forward-scattering
+            st.VolumetricEnabled = true; st.VolumetricDensity = 0.0025f; st.VolumetricAnisotropy = 0.75f; st.VolumetricDistance = 120f;
+            st.VolumetricNoise = 0.25f; st.VolumetricNoiseScale = 12f; st.VolumetricNoiseSpeed = 0.2f; st.VolumetricSun = 1.6f;
+            st.VolumetricLights = 0f; st.VolumetricAmbient = 0.04f; st.VolumetricSteps = 20; st.VolumetricShadows = true;
             st.Apply();
 
             // ---- the navmesh: the whole oasis walkable for the zombies (the terrain is ground, the trunks and rocks obstacles) ----
@@ -456,13 +461,13 @@ namespace VortexEditor.Shell
             for (int i = 0; i < 6; i++)
             {
                 int k = i;
-                specs.Add(new Spec { Type = types[k], Candidates = k == 5 ? 900 : 650, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) =>
+                specs.Add(new Spec { Type = types[k], Candidates = k == 5 ? 2000 : 1500, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) =>
                 {
                     if (hw < 0.35f || hw > 12f || ny < 0.85f) return 0f;
                     float g = grove(x, z);                                        // groves and clearings
-                    float ring = hw < 4f ? 0.55f : 0.55f * (1f - (hw - 4f) / 8f);   // densest just above the water
+                    float ring = hw < 4f ? 0.85f : 0.85f * (1f - (hw - 4f) / 8f);   // densest just above the water (the reference's thick groves)
                     float strip = Smooth((60f - Math.Abs(x - 20f) * 0.6f - Math.Abs(z + 10f)) / 25f);   // the open sand between the lakes
-                    return ring * Smooth((g - 0.25f) / 0.5f) * (1f - 0.85f * strip) * (Proximity(x, z) < 1.2f ? 1f : 0.15f);
+                    return ring * Smooth((g - 0.15f) / 0.5f) * (1f - 0.85f * strip) * (Proximity(x, z) < 1.2f ? 1f : 0.15f);
                 } });
             }
             // trees and shrubs on the damp ground
@@ -472,10 +477,16 @@ namespace VortexEditor.Shell
                 specs.Add(new Spec { Type = types[k], Candidates = 0, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) =>
                     hw < 0.8f || hw > 14f || ny < 0.85f || Proximity(x, z) > 1.2f ? 0f : 0.45f * grove(x + 50f, z - 30f) });
             }
-            specs.Add(new Spec { Type = types[9], Candidates = 220, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.5f : 0.07f) });
-            specs.Add(new Spec { Type = types[10], Candidates = 350, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.5f : 0.06f) });
-            specs.Add(new Spec { Type = types[11], Candidates = 2500, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.4f || ny < 0.75f ? 0f : (Proximity(x, z) < 1.4f ? 0.55f : 0.12f) * grove(x * 1.5f, z * 1.5f) });
-            specs.Add(new Spec { Type = types[12], Candidates = 500, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.6f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.35f : 0.08f) });
+            // the undergrowth of the groves: shrubs thick under the palms, thinning into the desert
+            specs.Add(new Spec { Type = types[9], Candidates = 520, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.75f : 0.07f) });
+            specs.Add(new Spec { Type = types[10], Candidates = 700, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.75f : 0.06f) });
+            specs.Add(new Spec { Type = types[11], Candidates = 3500, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.4f || ny < 0.75f ? 0f : (Proximity(x, z) < 1.4f ? 0.7f : 0.12f) * grove(x * 1.5f, z * 1.5f) });
+            specs.Add(new Spec { Type = types[12], Candidates = 900, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.6f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.55f : 0.08f) });
+            // dead fronds and leaves on the grove floor, stones and pebbles along the water line (the reference's shore)
+            specs.Add(new Spec { Type = types[16], Candidates = 2500, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.4f || hw > 12f || ny < 0.8f || Proximity(x, z) > 1.2f ? 0f : 0.6f * grove(x, z) });
+            specs.Add(new Spec { Type = types[24], Candidates = 3000, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.1f || hw > 1.4f ? 0f : 0.7f });
+            specs.Add(new Spec { Type = types[25], Candidates = 4000, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.05f || hw > 1.2f ? 0f : 0.8f });
+            specs.Add(new Spec { Type = types[26], Candidates = 700, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.2f || hw > 2.2f ? 0f : 0.5f });
             // the desert plain: quiver trees, succulents, dead wood (not on the dune slip faces, not on the escarpment's face)
             specs.Add(new Spec { Type = types[13], Candidates = 900, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 1f || ny < 0.88f ? 0f : (Proximity(x, z) > 1.0f && Proximity(x, z) < 2.6f ? 0.3f : 0.03f) });
             specs.Add(new Spec { Type = types[14], Candidates = 900, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 1f || ny < 0.88f ? 0f : (Proximity(x, z) > 1.0f && Proximity(x, z) < 2.6f ? 0.3f : 0.03f) });

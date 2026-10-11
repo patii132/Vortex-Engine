@@ -156,7 +156,7 @@ namespace vortex::graphics::dx12
 			CSM_CASCADES > 2 ? m_csm_splits[2] : 0.0f,
 			m_dir_shadow_distance };
 		memcpy(csm_ptr + (size_t)CSM_CASCADES * 64, splits, 16);
-		float params[4] = { m_dir_shadow_strength, m_dir_shadow_bias, (float)m_csm_count, 0.0f };
+		float params[4] = { m_dir_shadow_strength, m_dir_shadow_bias, (float)m_csm_count, m_dir_shadow_softness };   // w = PCF radius (texels)
 		memcpy(csm_ptr + (size_t)CSM_CASCADES * 64 + 16, params, 16);
 
 		// Point shadow tail (#25) @1504: PointShadows[2] entries + PointFaceVP[12] — byte-matched

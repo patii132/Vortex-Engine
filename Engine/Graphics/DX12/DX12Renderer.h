@@ -229,6 +229,9 @@ namespace vortex::graphics::dx12
 		void set_directional_light_full(const DirectX::XMFLOAT3& direction, const DirectX::XMFLOAT3& color, float intensity,
 			bool cast_shadows = false, float shadow_strength = 1.0f, float shadow_bias = 0.0008f,
 			float shadow_distance = 80.0f);
+		// The sun's shadow softness: the PCF radius in shadow texels — 1 = the classic 3x3 box, 2–8 = a 16-tap Poisson disk
+		// of that radius (Light ▸ Soft uses 4): palm shadows on sand get a penumbra instead of a stair-stepped edge.
+		void set_directional_shadow_softness(float texels) { m_dir_shadow_softness = texels < 1.0f ? 1.0f : (texels > 8.0f ? 8.0f : texels); }
 		void add_point_light(const PointLightData& light);
 		void add_spot_light(const SpotLightData& light);
 
@@ -960,6 +963,7 @@ namespace vortex::graphics::dx12
 		bool m_dir_cast_shadows{ false };
 		float m_dir_shadow_strength{ 1.0f };
 		float m_dir_shadow_bias{ 0.0008f };
+		float m_dir_shadow_softness{ 1.0f };   // the sun's PCF radius in shadow texels (1 = the 3x3 box, Light ▸ Soft = 4)
 		float m_dir_shadow_distance{ 80.0f };
 
 		// ---- Point light cube shadows (#25) ----

@@ -206,6 +206,7 @@ namespace vortex::graphics::sdlgpu
 		void set_scene_exposure(float multiplier) { m_frame_constants.scene_exposure = multiplier > 0.0f ? multiplier : 0.5f; }
 		void set_fog_sun_glow(float glow) { m_frame_constants.fog_sun_glow = glow > 0.0f ? glow : 0.0f; }
 		void set_tonemapper(u32 mode) { m_frame_constants.tonemapper = mode > 1u ? 1u : mode; }
+		void set_directional_shadow_softness(float texels) { m_dir_shadow_softness = texels < 1.0f ? 1.0f : (texels > 8.0f ? 8.0f : texels); }
 
 		PostFx& postfx() { return m_postfx; }
 		float elapsed_seconds() const
@@ -458,6 +459,8 @@ namespace vortex::graphics::sdlgpu
 			DirectX::XMFLOAT3 sun_direction; float sun_intensity;
 			DirectX::XMFLOAT3 sun_color; float tonemapper;   // the HDR path's curve: 0 = ACES fit, 1 = PBR Neutral
 			DirectX::XMFLOAT4 params;   // x: 1 = sample the equirect texture (#326), y: exposure, z: yaw offset (radians)
+			// aerial perspective on the HDR sky (@176): fog colour + density, the sun's direction + glow, the sun's colour
+			DirectX::XMFLOAT4 haze; DirectX::XMFLOAT4 glow_dir; DirectX::XMFLOAT4 glow_color;
 		};
 		struct PostFxCB
 		{
@@ -752,6 +755,7 @@ namespace vortex::graphics::sdlgpu
 		float m_ambient_strength{ 0.3f };
 		bool m_dir_cast_shadows{ false };
 		float m_dir_shadow_strength{ 1.0f }, m_dir_shadow_bias{ 0.0008f }, m_dir_shadow_distance{ 80.0f };
+		float m_dir_shadow_softness{ 1.0f };   // the sun's PCF radius in shadow texels (1 = the 3x3 box, Light ▸ Soft = 4)
 		std::vector<PointLightData> m_point_lights;
 		std::vector<SpotLightData> m_spot_lights;
 		PerFrameConstants m_frame_constants{};

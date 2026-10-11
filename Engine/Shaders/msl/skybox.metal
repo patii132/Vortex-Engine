@@ -11,7 +11,10 @@ struct SkyboxConstants
     packed_float3 ground_color;    float padding3;
     packed_float3 sun_direction;   float sun_intensity;
     packed_float3 sun_color;       float tonemapper;   // the HDR path's curve: 0 = ACES fit, 1 = PBR Neutral
-    float4 params;   // x: 1 = sample the equirect texture (#326), y: exposure, z: yaw offset (radians)
+    float4 params;
+    float4 haze;          // @176  aerial perspective on the HDR sky: rgb fog colour, w density (0 = off)
+    float4 glow_dir;      // @192  xyz the direction the sun's light travels, w the fog's sun glow
+    float4 glow_color;    // @208  rgb the sun's colour   // x: 1 = sample the equirect texture (#326), y: exposure, z: yaw offset (radians)
 };
 
 struct SkyOut
@@ -47,6 +50,16 @@ fragment float4 SkyPS(SkyOut in [[stage_in]], constant SkyboxConstants& c [[buff
         float u = atan2(dir.x, dir.z) / two_pi + 0.5 + c.params.z / two_pi;
         float v = acos(clamp(y, -1.0, 1.0)) / 3.14159265359;
         float3 sky = sky_tex.sample(sky_smp, float2(u, v), level(0)).rgb * c.params.y;
+        if (c.params.w > 0.0 && c.haze.w > 0.0)
+        {
+            // aerial perspective on the sky: the horizon whitens into the scene's haze (the path through the air grows as
+            // 1 / sin(elevation)), the sun glows in it, the zenith keeps its blue
+            float h = max(y, 0.0);
+            float f = 1.0 - exp(-c.haze.w * 40.0 / (h + 0.04));
+            float mu = saturate(dot(dir, normalize(-c.glow_dir.xyz)));
+            float3 hz = c.haze.rgb + c.glow_color.rgb * (c.glow_dir.w * (0.12 * mu * mu + 0.88 * pow(mu, 10.0)));
+            sky = mix(sky, hz, f);
+        }
         if (c.params.w < 0.0) sky = pow(saturate(sky), 1.0 / 2.2);   // a float picture the classic way: gamma-encoded, clamped
         else if (c.params.w > 0.0)
         {

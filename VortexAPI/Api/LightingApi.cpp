@@ -23,6 +23,13 @@ EDITOR_INTERFACE void SetDirectionalLight(
 	);
 }
 
+// The sun's shadow softness: the PCF radius in shadow texels (1 = the classic 3x3 box; Light ▸ Soft passes 4 = a 16-tap
+// Poisson disk, a real penumbra). Persistent like the light itself.
+EDITOR_INTERFACE void SetDirectionalShadowSoftness(float texels)
+{
+	graphics::Renderer::instance().set_directional_shadow_softness(texels);
+}
+
 // Add a point light (max 16 per frame). Shadow params (#25): castShadows != 0 requests a 6-face
 // cube block in the point shadow atlas — the renderer takes the first two such lights per frame.
 // Internal ABI: changed in lockstep with the editor's P/Invoke (both live in this repo).

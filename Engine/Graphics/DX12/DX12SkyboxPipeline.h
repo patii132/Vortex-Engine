@@ -39,6 +39,14 @@ namespace vortex::graphics::dx12
 			m_constants.params = { mode, exposure, rotation_radians, tonemap_exposure };
 		}
 		
+		// Aerial perspective for the HDR sky path: the scene fog and the sun's glow (texture mode only reads them).
+		void set_haze(const DirectX::XMFLOAT3& fog_color, float density, const DirectX::XMFLOAT3& light_dir, const DirectX::XMFLOAT3& light_color, float glow)
+		{
+			m_constants.haze = { fog_color.x, fog_color.y, fog_color.z, density };
+			m_constants.glow_dir = { light_dir.x, light_dir.y, light_dir.z, glow };
+			m_constants.glow_color = { light_color.x, light_color.y, light_color.z, 0.0f };
+		}
+
 		// Get constant buffer data
 		const void* get_constants() const { return &m_constants; }
 		size_t get_constants_size() const { return sizeof(m_constants); }
@@ -69,6 +77,10 @@ namespace vortex::graphics::dx12
 			DirectX::XMFLOAT3 sun_color;
 			float tonemapper;   // the HDR path's curve: 0 = ACES fit, 1 = PBR Neutral
 			DirectX::XMFLOAT4 params;   // x: 1 = sample the equirect texture at t0 (#326), y: exposure, z: yaw offset (radians)
+			// aerial perspective on the HDR sky (@176): the scene fog's colour + density, the sun's direction, colour and glow
+			DirectX::XMFLOAT4 haze;        // rgb fog colour, w density (0 = off)
+			DirectX::XMFLOAT4 glow_dir;    // xyz the direction the light travels, w the fog's sun glow
+			DirectX::XMFLOAT4 glow_color;  // rgb the light's colour
 		};
 
 		SkyboxConstants m_constants{};

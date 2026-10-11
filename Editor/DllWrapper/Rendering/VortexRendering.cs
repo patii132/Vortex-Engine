@@ -867,6 +867,9 @@ namespace Editor.DllWrapper
         private static extern void SetTonemapper(int mode);
 
         [DllImport(_dllName, CallingConvention = _cc)]
+        private static extern void SetDirectionalShadowSoftness(float texels);
+
+        [DllImport(_dllName, CallingConvention = _cc)]
         private static extern void SetPostFxVignette([MarshalAs(UnmanagedType.I1)] bool enabled,
             float intensity, float smoothness, float roundness, float r, float g, float b);
 
@@ -1000,6 +1003,13 @@ namespace Editor.DllWrapper
         public static void SetTonemapperMode(int mode)
         {
             try { SetTonemapper(mode); } catch { }
+        }
+
+        /// <summary>The sun's shadow softness: the PCF radius in shadow texels. 1 = the classic 3x3 box, 2–8 = a 16-tap Poisson
+        /// disk of that radius (Light ▸ Soft = 4) — a real penumbra under palms instead of a stair-stepped edge.</summary>
+        public static void SetDirectionalShadowSoftnessTexels(float texels)
+        {
+            try { SetDirectionalShadowSoftness(texels); } catch { }
         }
 
         /// <summary>Post-FX vignette (#29). Persistent renderer state like fog: applies to the editor

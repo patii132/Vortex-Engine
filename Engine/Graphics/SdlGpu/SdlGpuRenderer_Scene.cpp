@@ -283,7 +283,7 @@ namespace vortex::graphics::sdlgpu
 		for (auto& m : L.cascade_vp) m = ident;
 		for (auto& m : L.point_face_vp) m = ident;
 		L.point_shadows[0] = L.point_shadows[1] = { -1.0f, 0.0f, 0.0f, 0.0f };
-		L.dir_shadow_params = { m_dir_shadow_strength, m_dir_shadow_bias, 0.0f, 0.0f };
+		L.dir_shadow_params = { m_dir_shadow_strength, m_dir_shadow_bias, 0.0f, m_dir_shadow_softness };
 		L.cascade_splits = { 0.0f, 0.0f, 0.0f, m_dir_shadow_distance };
 		fill_sky_light(L);
 	}
@@ -780,6 +780,9 @@ namespace vortex::graphics::sdlgpu
 		c.sky_color = m_sky_color; c.horizon_color = m_horizon_color; c.ground_color = m_ground_color;
 		c.sun_direction = m_sun_direction; c.sun_intensity = m_sun_intensity; c.sun_color = m_sun_color;
 		c.tonemapper = (float)m_frame_constants.tonemapper;
+		c.haze = { m_frame_constants.fog_color.x, m_frame_constants.fog_color.y, m_frame_constants.fog_color.z, m_frame_constants.fog_density };
+		c.glow_dir = { m_frame_constants.light_direction.x, m_frame_constants.light_direction.y, m_frame_constants.light_direction.z, m_frame_constants.fog_sun_glow };
+		c.glow_color = { m_frame_constants.light_color.x, m_frame_constants.light_color.y, m_frame_constants.light_color.z, 0.0f };
 		// the equirect map (#326) — or the white texture, so sampler slot 0 is always bound
 		auto& reg = ResourceRegistry::instance();
 		Texture* sky = (m_skybox_mode == SkyboxMode::Texture && m_sky_texture != id::invalid_id) ? reg.get_texture(m_sky_texture) : nullptr;

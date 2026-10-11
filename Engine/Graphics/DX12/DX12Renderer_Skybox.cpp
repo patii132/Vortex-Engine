@@ -48,6 +48,8 @@ namespace vortex::graphics::dx12
 			m_skybox_pipeline.set_texture_params(sky ? 1.0f : 0.0f, m_sky_exposure, m_sky_rotation,
 				(sky && m_sky_hdr == 2) ? (m_frame_constants.scene_exposure > 0.0f ? m_frame_constants.scene_exposure : 0.5f) : ((sky && m_sky_hdr == 1) ? -1.0f : 0.0f),
 				(float)m_frame_constants.tonemapper);
+			m_skybox_pipeline.set_haze(m_frame_constants.fog_color, m_frame_constants.fog_density, m_frame_constants.light_direction,
+				m_frame_constants.light_color, m_frame_constants.fog_sun_glow);
 			if (!sky) sky = reg.get_texture(reg.default_white_texture());
 			if (auto* heap = reg.srv_heap()) { ID3D12DescriptorHeap* heaps[] = { heap }; m_command_list->SetDescriptorHeaps(1, heaps); }
 			if (sky && sky->srv_gpu().ptr != 0) m_command_list->SetGraphicsRootDescriptorTable(1, sky->srv_gpu());

@@ -22,6 +22,15 @@ void main()
 		float u = atan(dir.x, dir.z) / two_pi + 0.5 + c.params.z / two_pi;
 		float v = acos(clamp(y, -1.0, 1.0)) / 3.14159265359;
 		vec3 sky = textureLod(u_sky, vec2(u, v), 0.0).rgb * c.params.y;
+		if (c.params.w > 0.0 && c.haze.w > 0.0)
+		{
+			// aerial perspective on the sky: the horizon whitens into the scene's haze, the sun glows in it, the zenith keeps its blue
+			float h = max(y, 0.0);
+			float f = 1.0 - exp(-c.haze.w * 40.0 / (h + 0.04));
+			float mu = saturate(dot(dir, normalize(-c.glow_dir.xyz)));
+			vec3 hz = c.haze.rgb + c.glow_color.rgb * (c.glow_dir.w * (0.12 * mu * mu + 0.88 * pow(mu, 10.0)));
+			sky = mix(sky, hz, f);
+		}
 		if (c.params.w < 0.0) sky = pow(saturate(sky), vec3(1.0 / 2.2));   // a float picture the classic way: gamma-encoded, clamped
 		else if (c.params.w > 0.0)
 		{

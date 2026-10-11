@@ -242,7 +242,7 @@ namespace vortex::graphics::sdlgpu
 		for (auto& m : L.cascade_vp) m = ident;
 		for (auto& m : L.point_face_vp) m = ident;
 		L.point_shadows[0] = L.point_shadows[1] = { -1.0f, 0.0f, 0.0f, 0.0f };
-		L.dir_shadow_params = { m_dir_shadow_strength, m_dir_shadow_bias, 0.0f, 0.0f };
+		L.dir_shadow_params = { m_dir_shadow_strength, m_dir_shadow_bias, 0.0f, m_dir_shadow_softness };
 		L.cascade_splits = { 0.0f, 0.0f, 0.0f, m_dir_shadow_distance };
 		fill_sky_light(L);
 		for (u32 i = 0; i < MAX_SPOT_LIGHTS; ++i) { L.spot_lights[i].shadow_slot = -1.0f; L.spot_lights[i].shadow_strength = 0.0f; L.spot_lights[i].shadow_bias = 0.0f; }
@@ -324,7 +324,7 @@ namespace vortex::graphics::sdlgpu
 					m_csm_count = CSM_CASCADES;
 					for (u32 c = 0; c < CSM_CASCADES; ++c) L.cascade_vp[c] = m_csm_vp[c];
 					L.cascade_splits = { m_csm_splits[0], m_csm_splits[1], m_csm_splits[2], m_dir_shadow_distance };
-					L.dir_shadow_params = { m_dir_shadow_strength, m_dir_shadow_bias, (float)m_csm_count, 0.0f };
+					L.dir_shadow_params = { m_dir_shadow_strength, m_dir_shadow_bias, (float)m_csm_count, m_dir_shadow_softness };
 				}
 			}
 		}
