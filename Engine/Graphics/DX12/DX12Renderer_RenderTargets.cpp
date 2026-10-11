@@ -148,6 +148,7 @@ namespace vortex::graphics::dx12
 			frame_constants.env_horizon = DirectX::XMFLOAT4(m_env_horizon.x, m_env_horizon.y, m_env_horizon.z, env_map ? (float)m_env_mips : 0.0f);
 		}
 		frame_constants.env_ground = DirectX::XMFLOAT4(m_env_ground.x, m_env_ground.y, m_env_ground.z, 0.0f);
+		frame_constants.camera_clip = DirectX::XMFLOAT4(m_near_clip, m_far_clip, 0.0f, 0.0f);
 		if (m_light_cb_mapped)
 		{
 			u8* lptr = static_cast<u8*>(m_light_cb_mapped);
@@ -273,6 +274,11 @@ namespace vortex::graphics::dx12
 				if (m_ssao_current_srv.ptr != 0)
 					m_command_list->SetGraphicsRootDescriptorTable(13, m_ssao_current_srv); // t10 (#32)
 				{ auto env = env_map_srv(); if (env.ptr != 0) m_command_list->SetGraphicsRootDescriptorTable(14, env); } // t11 (IBL step 2)
+				{
+					// t12 / t13 (#200): no scene copies in a preview — the white fallback makes the water blend plainly
+					auto& rg = ResourceRegistry::instance(); Texture* white = rg.get_texture(rg.default_white_texture());
+					if (white && white->is_valid() && white->srv_gpu().ptr != 0) { m_command_list->SetGraphicsRootDescriptorTable(15, white->srv_gpu()); m_command_list->SetGraphicsRootDescriptorTable(16, white->srv_gpu()); }
+				}
 				m_command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 			
 			auto& reg = ResourceRegistry::instance();
@@ -411,7 +417,7 @@ namespace vortex::graphics::dx12
 		}
 		if (render_gizmos && (!m_gizmo_render.empty() || !m_gizmo_wire_render.empty()))
 		{
-			m_active_rtv = rtv; m_active_dsv = dsv;
+			m_active_rtv = rtv; m_active_dsv = dsv; m_active_color = target->resource();
 			m_active_width = target->width(); m_active_height = target->height();
 			this->render_gizmos();   // this-> so the bool param doesn't shadow the member function
 		}

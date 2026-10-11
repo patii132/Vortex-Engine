@@ -34,6 +34,7 @@ struct PerFrame
     float4 env_sky;
     float4 env_horizon;
     float4 env_ground;
+    float4 camera_clip;   // x near, y far clip of this view (#200 refraction / SSR) — @240
 };
 
 struct PerObject
@@ -206,6 +207,65 @@ static inline float3 sample_env(texture2d<float> env_tex, sampler env_smp, float
     return decode_env(env_tex.sample(env_smp, env_uv(R), level(lod)).rgb);
 }
 
+// Window z -> view-space distance for this view's perspective projection (near / far in camera_clip).
+static inline float linear_depth(float z, float4 clip)
+{
+    float n = clip.x, f = clip.y;
+    return n * f / max(f - z * (f - n), 1e-4);
+}
+
+// Screen-space reflection (#200): the reflected view ray, projected to the picture and walked there in even steps
+// (1 / w interpolates linearly along a straight line, so each sample's view depth is exact); where the ray dips behind
+// the opaque depth copy by less than a thickness that grows with distance, a few bisection steps settle the hit. The
+// hit's screen UV comes back with a weight that fades at the picture's edges; 0 = nothing (the sky map takes over).
+static inline float ssr_trace(constant PerFrame& frame, depth2d<float> scene_depth, float3 origin, float3 dir, float cam_dist, thread float2& hit_uv)
+{
+    hit_uv = float2(0.0, 0.0);
+    // orthographic views (the w column of a perspective view-projection carries the forward vector, an orthographic one
+    // is all zero there) and rays into the water: nothing
+    if (abs(frame.view_projection[0][3]) + abs(frame.view_projection[1][3]) + abs(frame.view_projection[2][3]) < 1e-5 || dir.y <= 0.02) return 0.0;
+    float2 dim = float2(scene_depth.get_width(), scene_depth.get_height());
+    float4 c0 = frame.view_projection * float4(origin, 1.0);
+    float4 cd = frame.view_projection * float4(dir, 0.0);
+    float L = 300.0;
+    if (c0.w + L * cd.w < 0.2) L = (0.2 - c0.w) / cd.w;   // towards the camera: stop in front of the near plane
+    if (L <= 0.05) return 0.0;
+    float4 c1 = c0 + L * cd;
+    float2 uv0 = float2(0.5 + 0.5 * c0.x / c0.w, 0.5 - 0.5 * c0.y / c0.w);
+    float2 uv1 = float2(0.5 + 0.5 * c1.x / c1.w, 0.5 - 0.5 * c1.y / c1.w);
+    float2 d = uv1 - uv0;
+    float tEnd = 1.0;
+    if (d.x > 0.0) tEnd = min(tEnd, (1.0 - uv0.x) / d.x); else if (d.x < 0.0) tEnd = min(tEnd, -uv0.x / d.x);
+    if (d.y > 0.0) tEnd = min(tEnd, (1.0 - uv0.y) / d.y); else if (d.y < 0.0) tEnd = min(tEnd, -uv0.y / d.y);
+    if (tEnd <= 0.0) return 0.0;
+    float invW0 = 1.0 / c0.w, invW1 = 1.0 / c1.w;
+    float tPrev = 0.0;
+    for (int i = 1; i <= 48; ++i)
+    {
+        float t = tEnd * float(i) / 48.0;
+        float2 uv = uv0 + d * t;
+        float w = 1.0 / mix(invW0, invW1, t);
+        float zs = linear_depth(scene_depth.read(uint2(uv * dim)), frame.camera_clip);
+        if (zs < w - 0.02 && w - zs < max(0.4, 0.06 * w))
+        {
+            float a = tPrev, b = t;
+            for (int k = 0; k < 4; ++k)
+            {
+                float m = 0.5 * (a + b);
+                float wm = 1.0 / mix(invW0, invW1, m);
+                float zm = linear_depth(scene_depth.read(uint2((uv0 + d * m) * dim)), frame.camera_clip);
+                if (zm < wm) b = m; else a = m;
+            }
+            float2 uvh = uv0 + d * b;
+            hit_uv = uvh;
+            float2 e = min(uvh, 1.0 - uvh);
+            return saturate(min(e.x, e.y) * 10.0);
+        }
+        tPrev = t;
+    }
+    return 0.0;
+}
+
 fragment float4 PSMain(VSOut in [[stage_in]],
                        constant PerFrame& frame [[buffer(0)]],
                        constant PerObject& obj [[buffer(1)]],
@@ -220,7 +280,9 @@ fragment float4 PSMain(VSOut in [[stage_in]],
                        depth2d<float>   csm_shadow    [[texture(7)]], sampler csm_smp       [[sampler(7)]],
                        depth2d<float>   point_shadow  [[texture(8)]], sampler point_smp     [[sampler(8)]],
                        texture2d<float> ssao_tex      [[texture(9)]], sampler ssao_smp      [[sampler(9)]],
-                       texture2d<float> env_tex       [[texture(10)]], sampler env_smp       [[sampler(10)]])
+                       texture2d<float> env_tex       [[texture(10)]], sampler env_smp       [[sampler(10)]],
+                       texture2d<float> scene_color   [[texture(11)]], sampler scene_smp     [[sampler(11)]],   // the opaque colour so far (#200)
+                       depth2d<float>   scene_depth   [[texture(12)]], sampler depth_smp     [[sampler(12)]])   // + its depth (window z)
 {
     float depth = max(in.uv.x, 0.0);
     float3 deep = obj.base_color.rgb, shallow = in.tint.rgb;
@@ -252,6 +314,9 @@ fragment float4 PSMain(VSOut in [[stage_in]],
     float3 lit = water * (horizon * frame.ambient_strength * 1.2 + sun * (0.12 + 0.28 * saturate(dot(N, L))));
 
     float3 R = reflect(-V, N);
+    const bool have_scene = scene_color.get_width() > 1;   // the white 1 px texture stands in before the copies exist
+    float2 ssr_uv = float2(0.0, 0.0);
+    float ssr_w = have_scene ? ssr_trace(frame, scene_depth, in.world_pos, R, cam_dist, ssr_uv) : 0.0;
     float3 sky_refl;
     if (frame.env_sky.w > 1.5)
     {
@@ -265,7 +330,7 @@ fragment float4 PSMain(VSOut in [[stage_in]],
     else
         sky_refl = mix(horizon, sky_color, saturate(R.y)) * 0.8;
     sky_refl *= max(frame.ambient_strength, 0.3) * 1.3;
-    float3 color = mix(lit, sky_refl, fresnel * reflection);
+    float3 color = mix(lit, sky_refl, fresnel * reflection * (1.0 - ssr_w));
 
     float3 H = normalize(V + L);
     float spec_pow = mix(1400.0, 24.0, rough);
@@ -291,5 +356,20 @@ fragment float4 PSMain(VSOut in [[stage_in]],
     float3 b = x * (0.983729 * x + 0.4329510) + 0.238081;
     color = saturate(a / b);
     color = pow(max(color, 0.0), 1.0 / 2.2);
+    if (have_scene)
+    {
+        // Refraction (#200): the opaque picture behind the surface, bent by the ripples (less in the shallows and far away),
+        // unless the bent sample lies in front of the surface — then the straight one. Composed here instead of the blend,
+        // and the screen-space reflection laid over it where the march hit.
+        float2 dim = float2(scene_color.get_width(), scene_color.get_height());
+        float2 uv = in.pos.xy / dim;
+        float2 ruv = clamp(uv + N.xz * 0.12 * saturate(depth / 0.6) * saturate(40.0 / max(cam_dist, 1.0)), 0.5 / dim, 1.0 - 0.5 / dim);
+        if (scene_depth.read(uint2(ruv * dim)) < in.pos.z) ruv = uv;
+        float3 behind = scene_color.sample(scene_smp, ruv, level(0)).rgb;
+        float3 outc = mix(behind, color, alpha);
+        if (ssr_w > 0.0)
+            outc = mix(outc, scene_color.sample(scene_smp, ssr_uv, level(0)).rgb, ssr_w * fresnel * reflection * (1.0 - foam) * alpha);
+        return float4(outc, 1.0);
+    }
     return float4(color, alpha);
 }

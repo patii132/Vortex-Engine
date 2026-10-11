@@ -526,6 +526,9 @@ namespace vortex::graphics::dx12
 		D3D12_CPU_DESCRIPTOR_HANDLE m_active_rtv{};
 		D3D12_CPU_DESCRIPTOR_HANDLE m_active_dsv{};
 		ID3D12Resource* m_active_depth{ nullptr };   // the depth resource behind m_active_dsv (the particle pass copies it)
+		ID3D12Resource* m_active_color{ nullptr };   // the colour resource behind m_active_rtv (copied for the water, #200)
+		D3D12_GPU_DESCRIPTOR_HANDLE m_scene_color_srv{};   // t12 / t13 for the transparent pass: the opaque colour + depth
+		D3D12_GPU_DESCRIPTOR_HANDLE m_scene_depth_srv{};   // so far (water refraction / SSR, #200); null until copied
 		u32 m_active_width{ 0 };
 		u32 m_active_height{ 0 };
 
@@ -645,6 +648,9 @@ namespace vortex::graphics::dx12
 			DirectX::XMFLOAT4 env_sky;
 			DirectX::XMFLOAT4 env_horizon;
 			DirectX::XMFLOAT4 env_ground;
+			// water refraction / screen-space reflections (#200): x = near, y = far clip of this view — @240, the struct
+			// stays exactly 256 bytes (the shadow passes clone it in fixed 256-byte slots)
+			DirectX::XMFLOAT4 camera_clip;
 		};
 		
 		// Separate light buffer for GPU

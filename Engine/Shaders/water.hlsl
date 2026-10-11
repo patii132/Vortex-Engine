@@ -39,6 +39,7 @@ cbuffer PerFrame : register(b0)
     float4 EnvSky;
     float4 EnvHorizon;
     float4 EnvGround;
+    float4 CameraClip;   // x near, y far clip of this view (#200 refraction / SSR) — @240
 };
 
 cbuffer PerObject : register(b1)
@@ -85,6 +86,9 @@ cbuffer LightBuffer : register(b2)
 
 Texture2D CsmShadowMap     : register(t8);
 Texture2D EnvMap           : register(t11);   // the sky as a reflection (IBL step 2)
+Texture2D SceneColor       : register(t12);   // the opaque colour so far (display-encoded), copied before the transparents (#200)
+Texture2D SceneDepth       : register(t13);   // its depth (window z): the refraction's occlusion test and the SSR march
+SamplerState ScreenSampler : register(s2);    // linear / clamp
 SamplerComparisonState ShadowSampler : register(s1);
 
 float FogOpticalDepth(float density, float heightY, float k, float3 cam, float3 worldPos)
@@ -218,6 +222,66 @@ float3 SampleEnv(float3 R, float roughness, float lodMin)
     return DecodeEnv(EnvMap.SampleLevel(LinearSampler, EnvUV(R), lod).rgb);
 }
 
+// Window z -> view-space distance for this view's perspective projection (near / far in CameraClip).
+float LinearDepth(float z)
+{
+    float n = CameraClip.x, f = CameraClip.y;
+    return n * f / max(f - z * (f - n), 1e-4);
+}
+
+// Screen-space reflection (#200): the reflected view ray, projected to the picture and walked there in even steps
+// (1 / w interpolates linearly along a straight line, so each sample's view depth is exact); where the ray dips behind
+// the opaque depth copy by less than a thickness that grows with distance, a few bisection steps settle the hit. The
+// hit's screen UV comes back with a weight that fades at the picture's edges; 0 = nothing (the sky map takes over).
+float SsrTrace(float3 origin, float3 dir, float camDist, out float2 hitUV)
+{
+    hitUV = float2(0.0, 0.0);
+    // orthographic views (the w column of a perspective view-projection carries the forward vector, an orthographic one
+    // is all zero there) and rays into the water: nothing
+    if (abs(ViewProjection[0][3]) + abs(ViewProjection[1][3]) + abs(ViewProjection[2][3]) < 1e-5 || dir.y <= 0.02) return 0.0;
+    uint w, h; SceneDepth.GetDimensions(w, h);
+    float2 dim = float2(w, h);
+    float4 c0 = mul(float4(origin, 1.0), ViewProjection);
+    float4 cd = mul(float4(dir, 0.0), ViewProjection);
+    float L = 300.0;
+    if (c0.w + L * cd.w < 0.2) L = (0.2 - c0.w) / cd.w;   // towards the camera: stop in front of the near plane
+    if (L <= 0.05) return 0.0;
+    float4 c1 = c0 + L * cd;
+    float2 uv0 = float2(0.5 + 0.5 * c0.x / c0.w, 0.5 - 0.5 * c0.y / c0.w);
+    float2 uv1 = float2(0.5 + 0.5 * c1.x / c1.w, 0.5 - 0.5 * c1.y / c1.w);
+    float2 d = uv1 - uv0;
+    float tEnd = 1.0;
+    if (d.x > 0.0) tEnd = min(tEnd, (1.0 - uv0.x) / d.x); else if (d.x < 0.0) tEnd = min(tEnd, -uv0.x / d.x);
+    if (d.y > 0.0) tEnd = min(tEnd, (1.0 - uv0.y) / d.y); else if (d.y < 0.0) tEnd = min(tEnd, -uv0.y / d.y);
+    if (tEnd <= 0.0) return 0.0;
+    float invW0 = 1.0 / c0.w, invW1 = 1.0 / c1.w;
+    float tPrev = 0.0;
+    [loop] for (int i = 1; i <= 48; ++i)
+    {
+        float t = tEnd * (float)i / 48.0;
+        float2 uv = uv0 + d * t;
+        float wr = 1.0 / lerp(invW0, invW1, t);
+        float zs = LinearDepth(SceneDepth.Load(int3((int2)(uv * dim), 0)).r);
+        if (zs < wr - 0.02 && wr - zs < max(0.4, 0.06 * wr))
+        {
+            float a = tPrev, b = t;
+            [unroll] for (int k = 0; k < 4; ++k)
+            {
+                float m = 0.5 * (a + b);
+                float wm = 1.0 / lerp(invW0, invW1, m);
+                float zm = LinearDepth(SceneDepth.Load(int3((int2)((uv0 + d * m) * dim), 0)).r);
+                if (zm < wm) b = m; else a = m;
+            }
+            float2 uvh = uv0 + d * b;
+            hitUV = uvh;
+            float2 e = min(uvh, 1.0 - uvh);
+            return saturate(min(e.x, e.y) * 10.0);
+        }
+        tPrev = t;
+    }
+    return 0.0;
+}
+
 float4 PSMain(PS_IN input) : SV_TARGET
 {
     float depth = max(input.uv.x, 0.0);
@@ -250,8 +314,12 @@ float4 PSMain(PS_IN input) : SV_TARGET
     float3 sun = LightColor * DirectionalIntensity * shadow;
     float3 lit = water * (horizon * AmbientStrength * 1.2 + sun * (0.12 + 0.28 * saturate(dot(N, L))));
 
-    // the sky in the surface
+    // the sky in the surface — and, where the march finds something, the scene itself (#200)
     float3 R = reflect(-V, N);
+    uint scw, sch; SceneColor.GetDimensions(scw, sch);
+    const bool haveScene = scw > 1;   // the white 1 px texture stands in before the transparent pass made the copies
+    float2 ssrUV = float2(0.0, 0.0);
+    float ssrW = haveScene ? SsrTrace(input.worldPos, R, camDist, ssrUV) : 0.0;
     float3 skyRefl;
     if (EnvSky.w > 1.5)
     {
@@ -265,7 +333,7 @@ float4 PSMain(PS_IN input) : SV_TARGET
     else
         skyRefl = lerp(horizon, skyColor, saturate(R.y)) * 0.8;
     skyRefl *= max(AmbientStrength, 0.3) * 1.3;
-    float3 color = lerp(lit, skyRefl, fresnel * reflection);
+    float3 color = lerp(lit, skyRefl, fresnel * reflection * (1.0 - ssrW));
 
     // sun glitter
     float3 H = normalize(V + L);
@@ -294,5 +362,20 @@ float4 PSMain(PS_IN input) : SV_TARGET
     float3 b = x * (0.983729 * x + 0.4329510) + 0.238081;
     color = saturate(a / b);
     color = pow(max(color, 0.0), 1.0 / 2.2);
+    if (haveScene)
+    {
+        // Refraction (#200): the opaque picture behind the surface, bent by the ripples (less in the shallows and far away),
+        // unless the bent sample lies in front of the surface — then the straight one. Composed here instead of the blend,
+        // and the screen-space reflection laid over it where the march hit.
+        float2 dim = float2(scw, sch);
+        float2 uv = input.pos.xy / dim;
+        float2 ruv = clamp(uv + N.xz * 0.12 * saturate(depth / 0.6) * saturate(40.0 / max(camDist, 1.0)), 0.5 / dim, 1.0 - 0.5 / dim);
+        if (SceneDepth.Load(int3((int2)(ruv * dim), 0)).r < input.pos.z) ruv = uv;
+        float3 behind = SceneColor.SampleLevel(ScreenSampler, ruv, 0).rgb;
+        float3 outc = lerp(behind, color, alpha);
+        if (ssrW > 0.0)
+            outc = lerp(outc, SceneColor.SampleLevel(ScreenSampler, ssrUV, 0).rgb, ssrW * fresnel * reflection * (1.0 - foam) * alpha);
+        return float4(outc, 1.0);
+    }
     return float4(color, alpha);
 }

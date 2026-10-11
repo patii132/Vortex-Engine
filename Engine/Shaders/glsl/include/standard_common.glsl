@@ -42,7 +42,8 @@ layout(set = SET_UNIFORM, binding = 0, std140) uniform PerFrameBlock
 	vec4  env_sky;                // @192  scene sky gradient for reflections (rgb); w = 1 when a sky is set
 	vec4  env_horizon;            // @208
 	vec4  env_ground;             // @224
-} frame;                          // = 240
+	vec4  camera_clip;            // @240  x near, y far clip of this view (#200 refraction / SSR)
+} frame;                          // = 256
 
 #ifdef VORTEX_NEED_PER_OBJECT
 layout(set = SET_UNIFORM, binding = 1, std140) uniform PerObjectBlock

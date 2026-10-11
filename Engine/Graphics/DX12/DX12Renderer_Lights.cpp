@@ -43,6 +43,7 @@ namespace vortex::graphics::dx12
 		m_frame_constants.env_sky = XMFLOAT4(m_env_sky.x, m_env_sky.y, m_env_sky.z, env_map ? 2.0f : env_on);   // 2 = a reflection map is bound at t11
 		m_frame_constants.env_horizon = XMFLOAT4(m_env_horizon.x, m_env_horizon.y, m_env_horizon.z, env_map ? (float)m_env_mips : 0.0f);
 		m_frame_constants.env_ground = XMFLOAT4(m_env_ground.x, m_env_ground.y, m_env_ground.z, 0.0f);
+		m_frame_constants.camera_clip = XMFLOAT4(m_near_clip, m_far_clip, 0.0f, 0.0f);
 	}
 
 	// Spot shadows (#23): select the shadow-casting spot + fill the shadow fields BEFORE the upload

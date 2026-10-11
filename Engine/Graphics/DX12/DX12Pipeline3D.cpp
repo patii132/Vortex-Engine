@@ -164,7 +164,7 @@ namespace vortex::graphics::dx12
 		// descriptor always exists wherever the standard PS runs.
 		// Param 13 is the SSAO texture table (t10, #32) — the blurred half-res AO the standard PS
 		// multiplies into the ambient term only (sampled with the s2 linear-clamp sampler).
-		D3D12_ROOT_PARAMETER params[15] = {};
+		D3D12_ROOT_PARAMETER params[17] = {};
 
 		params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
 		params[0].Descriptor.ShaderRegister = 0;
@@ -178,7 +178,7 @@ namespace vortex::graphics::dx12
 		params[2].Descriptor.ShaderRegister = 2;
 		params[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
-		static D3D12_DESCRIPTOR_RANGE srv_ranges[11] = {};
+		static D3D12_DESCRIPTOR_RANGE srv_ranges[13] = {};
 		for (int i = 0; i < 5; i++)
 		{
 			srv_ranges[i].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
@@ -261,6 +261,19 @@ namespace vortex::graphics::dx12
 		params[14].DescriptorTable.NumDescriptorRanges = 1;
 		params[14].DescriptorTable.pDescriptorRanges = &srv_ranges[10];
 		params[14].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+		// Scene colour (t12) + depth (t13) copies for the transparent pass — water refraction / screen-space reflections (#200).
+		for (int k = 0; k < 2; ++k)
+		{
+			srv_ranges[11 + k].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+			srv_ranges[11 + k].NumDescriptors = 1;
+			srv_ranges[11 + k].BaseShaderRegister = 12 + k;
+			srv_ranges[11 + k].RegisterSpace = 0;
+			srv_ranges[11 + k].OffsetInDescriptorsFromTableStart = 0;
+			params[15 + k].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+			params[15 + k].DescriptorTable.NumDescriptorRanges = 1;
+			params[15 + k].DescriptorTable.pDescriptorRanges = &srv_ranges[11 + k];
+			params[15 + k].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+		}
 
 		D3D12_STATIC_SAMPLER_DESC samplers[3] = {};
 		samplers[0].Filter = D3D12_FILTER_ANISOTROPIC;
@@ -310,7 +323,7 @@ namespace vortex::graphics::dx12
 		samplers[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
 		D3D12_ROOT_SIGNATURE_DESC desc{};
-		desc.NumParameters = 15;
+		desc.NumParameters = 17;
 		desc.pParameters = params;
 		desc.NumStaticSamplers = 3;
 		desc.pStaticSamplers = samplers;

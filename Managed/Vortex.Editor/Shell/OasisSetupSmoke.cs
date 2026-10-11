@@ -508,7 +508,18 @@ namespace VortexEditor.Shell
                 EditorViewportService.Instance.AreGizmosVisible = false;    // no light / particle icons either
                 // a fresh editor loads the 28 models after its first frames: wait until the vegetation draws
                 Look(cam, At(ter, 205f, 150f, 42f), new Vector3(0f, WaterLevel - 2f, -8f));
-                for (int i = 0; i < 80 && FoliageService.LastInstancesDrawn == 0; i++) { EditorViewportSession.RequestResubmit(); await Task.Delay(400); }
+                int waited = 0;
+                for (; waited < 80 && FoliageService.LastInstancesDrawn == 0; waited++) { EditorViewportSession.RequestResubmit(); await Task.Delay(400); }
+                if (FoliageService.LastInstancesDrawn == 0)
+                {
+                    // the built-in checks before this one (scene switch, export, play + stop) can leave the vegetation's
+                    // runtimes without their models: rebuild them from scratch and wait once more
+                    var fol = TemplateSetupSmoke.Find(scene, e => e.GetComponent<FoliageComponent>() != null);
+                    log.LogWarning("oasis capture: no vegetation drawn after " + waited + " waits — foliage entity " + (fol != null ? fol.Name + " active=" + fol.IsActive + " hidden=" + fol.IsHiddenInEditor + " enabled=" + (fol.GetComponent<FoliageComponent>()?.IsEnabled) : "MISSING") + "; rebuilding the runtimes");
+                    FoliageService.Clear();
+                    for (waited = 0; waited < 40 && FoliageService.LastInstancesDrawn == 0; waited++) { EditorViewportSession.RequestResubmit(); await Task.Delay(400); }
+                }
+                log.Log("oasis capture: " + FoliageService.LastInstancesDrawn + " vegetation instances drawn before the pictures (" + FoliageService.LastDrawCalls + " draws, " + waited + " waits)");
                 await SmokeRegistry.Settle(1500);
                 // the reference view: from the dunes east of the lakes, the sun behind the camera, both lakes and the palms ahead
                 Look(cam, At(ter, 205f, 150f, 42f), new Vector3(0f, WaterLevel - 2f, -8f));

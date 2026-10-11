@@ -722,6 +722,7 @@ namespace vortex::graphics::dx12
 			m_active_rtv = m_scaled_rt.rtv();
 			m_active_dsv = m_scaled_rt.dsv();
 			m_active_depth = m_scaled_rt.depth_resource();
+			m_active_color = m_scaled_rt.resource();
 			m_active_width = m_scaled_rt.width();
 			m_active_height = m_scaled_rt.height();
 
@@ -859,6 +860,7 @@ namespace vortex::graphics::dx12
 			m_active_rtv = m_swapchain.current_rtv();
 			m_active_dsv = m_depth_buffer.dsv();
 			m_active_depth = m_depth_buffer.resource();
+			m_active_color = m_swapchain.current_back_buffer();
 			m_active_width = m_swapchain.width();
 			m_active_height = m_swapchain.height();
 

@@ -57,6 +57,7 @@ namespace vortex::graphics::dx12
 		// Target the game window's own swapchain + depth at its own size, using the CURRENT camera
 		// (the caller sets the game's main camera before calling this).
 		m_active_rtv = m_game_swapchain.current_rtv();
+		m_active_color = m_game_swapchain.current_back_buffer();
 		m_active_dsv = m_game_depth.dsv();
 		m_active_width = m_game_swapchain.width();
 		m_active_height = m_game_swapchain.height();
@@ -77,6 +78,7 @@ namespace vortex::graphics::dx12
 		{
 			pfx_in->transition_to_render_target(m_command_list.Get());
 			m_active_rtv = pfx_in->rtv();   // scene color -> chain input; depth stays the game window's
+			m_active_color = pfx_in->resource();
 		}
 
 		// Spot-light shadow pass (#23) — THIS is the shipped game's render path (the flashlight!).

@@ -367,6 +367,8 @@ namespace Editor.Core.Services
         /// references any more — a scene switch (#358); a live re-import keeps the materials (InvalidateModel).</summary>
         private static void EvictModel(string modelPath)
         {
+            // whatever still holds this model's mesh ids must reload: the foliage runtimes cache them per type (#125)
+            try { Editor.Core.Services.Foliage.FoliageService.Clear(); } catch { }
             string target = NormalizeModelPath(modelPath);
             var mats = new HashSet<long>();
             foreach (var kv in _meshPathToMaterialId) if (SameModel(kv.Key, target) && kv.Value >= 0) mats.Add(kv.Value);
@@ -407,6 +409,12 @@ namespace Editor.Core.Services
                 if (e == null) continue;
                 var mr = e.GetComponent<MeshRenderer>();
                 if (mr != null && !string.IsNullOrEmpty(mr.MeshPath) && !IsPrimitivePath(mr.MeshPath)) into.Add(NormalizeModelPath(mr.MeshPath));
+                // painted vegetation (#125) references its models through the Foliage component's types, not a MeshRenderer:
+                // a scene switch evicted them and the foliage runtimes kept drawing dead mesh ids (nothing on screen)
+                var fol = e.GetComponent<Editor.ECS.Components.Rendering.Foliage>();
+                if (fol != null && fol.Types != null)
+                    foreach (var t in fol.Types)
+                        if (t != null && !string.IsNullOrEmpty(t.MeshPath)) into.Add(NormalizeModelPath(t.MeshPath));
                 if (e.Children != null) CollectModelPaths(e.Children, into);
             }
         }

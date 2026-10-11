@@ -55,6 +55,7 @@ namespace vortex::graphics::dx12
 
 	void DX12Renderer::render_3d_scene()
 	{
+		m_scene_color_srv = {}; m_scene_depth_srv = {};   // the transparent pass copies them below (#200)
 		auto rtv = m_active_rtv;
 		auto dsv = m_active_dsv;
 		m_command_list->OMSetRenderTargets(1, &rtv, FALSE, &dsv);
@@ -609,6 +610,13 @@ namespace vortex::graphics::dx12
 		// instancing here, and horror scenes hold dozens of transparents, not thousands (capped anyway).
 		if (!transparentRuns.empty() && m_instance_vb_mapped)
 		{
+			// Water refraction / screen-space reflections (#200): the transparents read a copy of the opaque colour + depth so far.
+			if (world && m_active_color && m_active_depth)
+			{
+				m_scene_color_srv = m_particles.scene_color_srv(m_command_list.Get(), m_active_color);
+				m_scene_depth_srv = m_particles.scene_depth_srv(m_command_list.Get(), m_active_depth);
+				bind_scene_pass(m_per_frame_cb->GetGPUVirtualAddress());
+			}
 			struct TDraw { u32 run; u32 slot; float d2; };
 			std::vector<TDraw> titems;
 			constexpr size_t MAX_TRANSPARENT_DRAWS = 4096;
@@ -720,6 +728,15 @@ namespace vortex::graphics::dx12
 		if (m_ssao_current_srv.ptr != 0)
 			m_command_list->SetGraphicsRootDescriptorTable(13, m_ssao_current_srv); // t10 (#32)
 		{ auto env = env_map_srv(); if (env.ptr != 0) m_command_list->SetGraphicsRootDescriptorTable(14, env); } // t11 (IBL step 2)
+		{
+			// t12 / t13 (#200): the opaque colour + depth copies once the transparent pass made them, the white texture before
+			auto& rg = ResourceRegistry::instance(); Texture* white = rg.get_texture(rg.default_white_texture());
+			const D3D12_GPU_DESCRIPTOR_HANDLE fallback = (white && white->is_valid()) ? white->srv_gpu() : D3D12_GPU_DESCRIPTOR_HANDLE{};
+			const D3D12_GPU_DESCRIPTOR_HANDLE sc = m_scene_color_srv.ptr ? m_scene_color_srv : fallback;
+			const D3D12_GPU_DESCRIPTOR_HANDLE sd = m_scene_depth_srv.ptr ? m_scene_depth_srv : fallback;
+			if (sc.ptr != 0) m_command_list->SetGraphicsRootDescriptorTable(15, sc);
+			if (sd.ptr != 0) m_command_list->SetGraphicsRootDescriptorTable(16, sd);
+		}
 	}
 
 	DX12Particles::View DX12Renderer::particle_view(const DirectX::XMFLOAT4X4& view_projection, const DirectX::XMFLOAT4X4& viewmodel_projection,

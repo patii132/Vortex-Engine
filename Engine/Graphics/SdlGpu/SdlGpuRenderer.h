@@ -390,8 +390,10 @@ namespace vortex::graphics::sdlgpu
 			float ssao_enabled; float ssao_padding[3];
 			// scene sky gradient for specular reflections (w = 1 when a gradient sky is active)
 			DirectX::XMFLOAT4 env_sky; DirectX::XMFLOAT4 env_horizon; DirectX::XMFLOAT4 env_ground;
+			// water refraction / screen-space reflections (#200): x = near, y = far clip of this view — @240
+			DirectX::XMFLOAT4 camera_clip;
 		};
-		static_assert(sizeof(PerFrameConstants) == 240, "PerFrameConstants must byte-match standard.metal");
+		static_assert(sizeof(PerFrameConstants) == 256, "PerFrameConstants must byte-match standard.metal (prefix) / water.metal");
 
 		struct PerObjectConstants
 		{
@@ -760,6 +762,14 @@ namespace vortex::graphics::sdlgpu
 		// declared as comparison-sampled depth textures (sampler2DShadow / depth2d), so a colour texture with
 		// a non-comparison sampler is not a legal binding for them under Vulkan.
 		SDL_GPUTexture* m_shadow_dummy{ nullptr };
+		// the opaque colour + depth so far, copied before the transparent pass for the water's refraction / SSR (#200);
+		// bound at fragment slots 11 / 12 while valid, the white texture / the shadow dummy otherwise
+		SDL_GPUTexture* m_scene_color_copy{ nullptr };
+		SDL_GPUTexture* m_scene_depth_copy{ nullptr };
+		u32 m_scene_copy_w{ 0 }, m_scene_copy_h{ 0 };
+		bool m_scene_copy_valid{ false };
+		u32 m_transparent_runs_seen{ 0 };   // record_runs: how many transparent runs the last scan found
+		void copy_scene_for_transparents(SDL_GPUCommandBuffer* cmd, const GpuTarget& target);
 		SDL_GPUShader* m_vs_shadow{ nullptr };
 		SDL_GPUShader* m_vs_shadow_skinned_layout{ nullptr };
 		SDL_GPUShader* m_fs_shadow{ nullptr };

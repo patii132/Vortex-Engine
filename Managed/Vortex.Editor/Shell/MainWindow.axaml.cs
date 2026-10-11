@@ -304,7 +304,11 @@ namespace VortexEditor.Shell
         private void SmokeFull(Scene scene)
         {
             var log = ConsoleService.Instance;
-            void Check(string what, Func<bool> f) { bool ok = false; string err = null; try { ok = f(); } catch (Exception ex) { err = ex.Message; } if (ok) log.Log("SMOKE OK   " + what); else log.LogError("SMOKE FAIL " + what + (err != null ? ": " + err : "")); }
+            // VORTEX_SMOKE_SKIP="split view,export": leave out the built-in checks whose name contains one of the parts (bisecting
+            // a check that disturbs a registered one, e.g. a template capture)
+            string skipList = System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_SKIP") ?? "";
+            string[] skipParts = Array.FindAll(skipList.Split(','), p => p.Trim().Length > 0);
+            void Check(string what, Func<bool> f) { if (Array.Exists(skipParts, p => what.IndexOf(p.Trim(), StringComparison.OrdinalIgnoreCase) >= 0)) { log.Log("SMOKE SKIP " + what); return; } bool ok = false; string err = null; try { ok = f(); } catch (Exception ex) { err = ex.Message; } if (ok) log.Log("SMOKE OK   " + what); else log.LogError("SMOKE FAIL " + what + (err != null ? ": " + err : "")); }
             int before = scene?.Entities?.Count ?? 0;
             Check("create cube", () => { EditorCommands.CreatePrimitive(PrimitiveType.Cube); return scene.Entities.Count == before + 1; });
             Check("undo create", () => { EditorCommands.Undo(); return scene.Entities.Count == before; });
