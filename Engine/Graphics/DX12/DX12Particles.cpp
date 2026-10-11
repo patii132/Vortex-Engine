@@ -389,6 +389,7 @@ namespace vortex::graphics::dx12
 	D3D12_GPU_DESCRIPTOR_HANDLE DX12Particles::scene_color_srv(ID3D12GraphicsCommandList* cmd, ID3D12Resource* color)
 	{
 		DepthCopy* cc = m_device ? copy_color(cmd, color) : nullptr;
+		m_last_scene_color = cc;
 		return cc ? cc->gpu : D3D12_GPU_DESCRIPTOR_HANDLE{};
 	}
 

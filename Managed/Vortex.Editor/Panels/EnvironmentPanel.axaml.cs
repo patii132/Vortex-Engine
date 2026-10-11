@@ -54,6 +54,9 @@ namespace VortexEditor.Panels
                 Slider("Stops", "−3 … +4 stops; a sunlit desert wants +1.5 … +2.5, a night scene −1", -3, 4, s => s.SceneExposure, (s, v) => s.SceneExposure = v),
                 Choice("Tonemapper", "ACES: the classic filmic curve — bright saturated colours drift towards white. PBR Neutral (Khronos): keeps hue and saturation, a sunlit desert stays orange.", new[] { "ACES", "PBR Neutral" }, s => s.Tonemapper, (s, v) => s.Tonemapper = v)));
             Sections.Children.Add(Section("Anti-aliasing", "FXAA on the final picture: smooth edges on fronds, grass and ripples (nine taps, no history, ~0.3 ms). Temporal AA comes with the AAA rendering milestone.", s => s.AntiAliasEnabled, (s, v) => s.AntiAliasEnabled = v));
+            Sections.Children.Add(Section("Global Illumination", "Dynamic GI, step 1 (screen space): one bounce of the lit world traced against the depth with the previous frame's light — sunlit sand warms the palm trunks, a lit wall lights the floor beside it. Needs SSAO on; ~0.4 ms at half resolution. The world-space probe cache and ray tracing follow.", s => s.GiEnabled, (s, v) => s.GiEnabled = v,
+                Slider("Strength", "1 = a physical diffuse bounce", 0, 3, s => s.GiStrength, (s, v) => s.GiStrength = v),
+                Slider("Radius (m)", "How far a bounce ray travels", 0.5, 10, s => s.GiRadius, (s, v) => s.GiRadius = v)));
             Sections.Children.Add(Section("Ground Bounce", "The sun's light bounced off the ground into the shadows: a warm lower hemisphere added to the sky light, scaled by the sun's strength and height. 0 = off; a desert noon wants 0.4–0.7.", null, null,
                 Slider("Strength", null, 0, 1.5, s => s.BounceStrength, (s, v) => s.BounceStrength = v),
                 ColorRow("Ground", s => (s.BounceR, s.BounceG, s.BounceB), (s, c) => { s.BounceR = c.r; s.BounceG = c.g; s.BounceB = c.b; })));

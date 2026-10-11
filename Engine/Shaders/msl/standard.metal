@@ -33,7 +33,8 @@ struct PerFrame
     float scene_exposure;              // @156  pre-tonemap multiplier (0.5 = classic; <= 0 reads as 0.5)
     float shadow_map_texel;            // @160
     uint tonemapper;                   // @164  0 = ACES fit, 1 = PBR Neutral
-    uint shadow_padding[2];
+    float gi_strength;                 // @168  screen-space GI: > 0 = ssao_tex.rgb carries bounce light
+    uint shadow_padding1;
     float ssao_enabled;                // @176
     float ssao_padding[2];             // the AO UV scale
     float fog_sun_glow;                // @188  the sun's glow in the fog (0 = off)
@@ -657,7 +658,9 @@ fragment float4 PSMain(VSOut in [[stage_in]],
     if (frame.ssao_enabled > 0.5)
     {
         float2 auv = in.pos.xy * float2(frame.ssao_padding[0], frame.ssao_padding[1]);
-        ambient *= ssao_tex.sample(ssao_smp, auv).r;
+        float4 ss = ssao_tex.sample(ssao_smp, auv);
+        ambient *= ss.a;
+        if (frame.gi_strength > 0.0) ambient += ss.rgb * ss.rgb * 4.0 * albedo * (1.0 - metallic) * ss.a;   // screen-space GI (#257 step 1)
     }
 
     float rim_fresnel = pow(saturate(1.0 - NdotV), 5.0);

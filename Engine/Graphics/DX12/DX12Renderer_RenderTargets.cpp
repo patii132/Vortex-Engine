@@ -141,6 +141,7 @@ namespace vortex::graphics::dx12
 		frame_constants.point_light_count = static_cast<u32>((std::min)(m_point_lights.size(), static_cast<size_t>(MAX_POINT_LIGHTS)));
 		frame_constants.spot_light_count = static_cast<u32>((std::min)(m_spot_lights.size(), static_cast<size_t>(MAX_SPOT_LIGHTS)));
 		frame_constants.ssao_enabled = 0.0f;   // #32: previews never sample the main view's AO
+		frame_constants.gi_strength = 0.0f;
 		{
 			const float env_on = (m_skybox_enabled && (m_skybox_mode == SkyboxMode::Gradient || m_skybox_mode == SkyboxMode::Texture)) ? 1.0f : 0.0f;
 			const bool env_map = env_on > 0.5f && m_env_map != id::invalid_id && m_env_mips > 0;

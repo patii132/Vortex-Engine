@@ -193,6 +193,9 @@ namespace vortex::graphics::sdlgpu
 		};
 
 		void clear_lights();
+		// Screen-space GI (#257 step 1): one bounce traced in the SSAO pass (needs SSAO on); strength scales the bounce,
+		// radius = the trace length in metres.
+		void set_gi(bool enabled, float strength, float radius) { m_gi_enabled = enabled && strength > 0.001f; m_gi_strength = strength < 0.0f ? 0.0f : strength; m_gi_radius = radius < 0.25f ? 0.25f : radius; }
 		void set_ssao(bool enabled, float radius, float intensity)
 		{
 			m_ssao_enabled = enabled && intensity > 0.001f;
@@ -393,7 +396,7 @@ namespace vortex::graphics::sdlgpu
 			u32 point_light_count; u32 spot_light_count; u32 padding1[2];
 			DirectX::XMFLOAT3 fog_color; float fog_density;
 			float fog_height_y; float fog_height_falloff; u32 fog_mode; float scene_exposure;   // pre-tonemap multiplier (0.5 = classic)
-			float shadow_map_texel; u32 tonemapper; u32 shadow_padding[2];   // tonemapper: 0 = ACES fit, 1 = PBR Neutral
+			float shadow_map_texel; u32 tonemapper; float gi_strength; u32 shadow_padding1;   // tonemapper: 0 = ACES fit, 1 = PBR Neutral; gi > 0 = bounce light in the AO texture's rgb
 			float ssao_enabled; float ssao_padding[2]; float fog_sun_glow;   // [0..1] = AO UV scale; the sun's glow in the fog
 			// scene sky gradient for specular reflections (w = 1 when a gradient sky is active)
 			DirectX::XMFLOAT4 env_sky; DirectX::XMFLOAT4 env_horizon; DirectX::XMFLOAT4 env_ground;
@@ -778,6 +781,9 @@ namespace vortex::graphics::sdlgpu
 		SDL_GPUTexture* m_scene_depth_copy{ nullptr };
 		u32 m_scene_copy_w{ 0 }, m_scene_copy_h{ 0 };
 		bool m_scene_copy_valid{ false };
+		// screen-space GI (#257 step 1): the last frame's copy is the GI pass's radiance source; its VP reprojects into it
+		bool m_gi_enabled{ false }; float m_gi_strength{ 1.0f }, m_gi_radius{ 2.5f };
+		DirectX::XMFLOAT4X4 m_gi_prev_view_projection{}; u32 m_gi_prev_w{ 0 }, m_gi_prev_h{ 0 }; bool m_gi_prev_valid{ false };
 		u32 m_transparent_runs_seen{ 0 };   // record_runs: how many transparent runs the last scan found
 		void copy_scene_for_transparents(SDL_GPUCommandBuffer* cmd, const GpuTarget& target);
 		SDL_GPUShader* m_vs_shadow{ nullptr };

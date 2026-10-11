@@ -87,6 +87,8 @@ namespace vortex::graphics::dx12
 		// A copy of the pass's COLOUR target so far (same format), sampled by the water for refraction / SSR (#200).
 		// `color` must be in RENDER_TARGET state; it is returned to it.
 		D3D12_GPU_DESCRIPTOR_HANDLE scene_color_srv(ID3D12GraphicsCommandList* cmd, ID3D12Resource* color);
+		// the entry the last scene_color_srv call used (the GI pass reads it next frame); null until a copy was made
+		DepthCopy* last_scene_color() { return m_last_scene_color; }
 
 	private:
 		static constexpr u32 SNAP_SLOTS = 4;
@@ -138,6 +140,7 @@ namespace vortex::graphics::dx12
 
 		DepthCopy m_depth_copies[DEPTH_COPIES];
 		DepthCopy m_color_copies[2];   // the colour target so far, per size/format (#200)
+		DepthCopy* m_last_scene_color{ nullptr };
 
 		// collision depth snapshot: a small R32_FLOAT target + a readback ring
 		ComPtr<ID3D12Resource> m_snap_texture;

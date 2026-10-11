@@ -89,6 +89,10 @@ namespace Editor.Core.Data
         [DataMember(Name = "bounceR", Order = 87)] public float BounceR { get; set; } = 0.55f;
         [DataMember(Name = "bounceG", Order = 88)] public float BounceG { get; set; } = 0.40f;
         [DataMember(Name = "bounceB", Order = 89)] public float BounceB { get; set; } = 0.26f;
+        // ---- Global illumination (#257): step 1 = screen space (one bounce traced in the SSAO pass; needs SSAO on) ----
+        [DataMember(Name = "giOn", Order = 90)] public bool GiEnabled { get; set; }
+        [DataMember(Name = "giStrength", Order = 91)] public float GiStrength { get; set; } = 1.0f;
+        [DataMember(Name = "giRadius", Order = 92)] public float GiRadius { get; set; } = 2.5f;
 
         /// <summary>DataContractSerializer builds an UNINITIALIZED object (field initializers never
         /// run), so members missing from an older .vscene would deserialize as 0 — a scene saved
@@ -99,6 +103,7 @@ namespace Editor.Core.Data
         {
             FogDensity = 0.08f; FogR = 0.02f; FogG = 0.025f; FogB = 0.035f;
             BounceR = 0.55f; BounceG = 0.40f; BounceB = 0.26f;
+            GiStrength = 1.0f; GiRadius = 2.5f;
             VignetteIntensity = 0.8f; VignetteSmoothness = 0.5f; VignetteRoundness = 1.0f;
             GrainIntensity = 0.35f; GrainSize = 1.6f;
             CaStrength = 0.35f; CaFalloff = 1.2f;
@@ -125,6 +130,7 @@ namespace Editor.Core.Data
             DllWrapper.VortexAPI.SetPostColorGrade(GradeEnabled, Exposure, Contrast, Saturation, Temperature, Tint);
             DllWrapper.VortexAPI.SetPostBloom(BloomEnabled, BloomThreshold, BloomKnee, BloomIntensity, BloomScatter);
             DllWrapper.VortexAPI.SetAmbientOcclusion(AoEnabled, AoRadius, AoIntensity);
+            DllWrapper.VortexAPI.SetGlobalIllumination(GiEnabled && AoEnabled, GiStrength, GiRadius);
             DllWrapper.VortexAPI.SetVolumetricFog(VolumetricEnabled, VolumetricDensity, VolumetricAnisotropy, VolumetricDistance, VolumetricNoise,
                 VolumetricNoiseScale, VolumetricNoiseSpeed, VolumetricSun, VolumetricLights, VolumetricAmbient, VolumetricSteps, VolumetricShadows);
         }

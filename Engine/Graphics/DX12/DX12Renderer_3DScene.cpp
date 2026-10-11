@@ -608,15 +608,19 @@ namespace vortex::graphics::dx12
 		// each item's view depth comes from the world translation at bytes 48..59 of its 64B matrix.
 		// Blend order matters, so items draw ONE BY ONE with depth write off — correct layering beats
 		// instancing here, and horror scenes hold dozens of transparents, not thousands (capped anyway).
+		// Water refraction / screen-space reflections (#200): the transparents read a copy of the opaque colour + depth so far;
+		// the screen-space GI (#257 step 1) reads the colour copy NEXT frame, so it is made every frame while GI is on.
+		if (world && m_active_color && m_active_depth && (!transparentRuns.empty() || m_gi_enabled))
+		{
+			m_scene_color_srv = m_particles.scene_color_srv(m_command_list.Get(), m_active_color);
+			m_scene_depth_srv = m_particles.scene_depth_srv(m_command_list.Get(), m_active_depth);
+			// the GI pass reprojects into this copy next frame (it checks the size against its own view, so a preview's copy
+			// of another size is never mistaken for the main view's)
+			m_gi_prev_copy = m_particles.last_scene_color(); m_gi_prev_w = m_active_width; m_gi_prev_h = m_active_height;
+			if (!transparentRuns.empty()) bind_scene_pass(m_per_frame_cb->GetGPUVirtualAddress());
+		}
 		if (!transparentRuns.empty() && m_instance_vb_mapped)
 		{
-			// Water refraction / screen-space reflections (#200): the transparents read a copy of the opaque colour + depth so far.
-			if (world && m_active_color && m_active_depth)
-			{
-				m_scene_color_srv = m_particles.scene_color_srv(m_command_list.Get(), m_active_color);
-				m_scene_depth_srv = m_particles.scene_depth_srv(m_command_list.Get(), m_active_depth);
-				bind_scene_pass(m_per_frame_cb->GetGPUVirtualAddress());
-			}
 			struct TDraw { u32 run; u32 slot; float d2; };
 			std::vector<TDraw> titems;
 			constexpr size_t MAX_TRANSPARENT_DRAWS = 4096;

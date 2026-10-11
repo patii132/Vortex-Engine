@@ -312,6 +312,7 @@ namespace vortex::graphics::sdlgpu
 		v.frame.point_light_count = (u32)(std::min)(m_point_lights.size(), (size_t)MAX_POINT_LIGHTS);
 		v.frame.spot_light_count = (u32)(std::min)(m_spot_lights.size(), (size_t)MAX_SPOT_LIGHTS);
 		v.frame.ssao_enabled = 0.0f;
+		v.frame.gi_strength = 0.0f;
 		fill_environment(v.frame);
 		v.frame.shadow_map_texel = 1.0f / (float)SHADOW_TILE_SIZE;
 		v.eye = m_camera_position;
@@ -354,6 +355,7 @@ namespace vortex::graphics::sdlgpu
 		v.frame.point_light_count = (u32)(std::min)(m_point_lights.size(), (size_t)MAX_POINT_LIGHTS);
 		v.frame.spot_light_count = (u32)(std::min)(m_spot_lights.size(), (size_t)MAX_SPOT_LIGHTS);
 		v.frame.ssao_enabled = 0.0f;
+		v.frame.gi_strength = 0.0f;
 		fill_environment(v.frame);
 		v.frame.shadow_map_texel = 1.0f / (float)SHADOW_TILE_SIZE;
 		v.eye = camera.position;
@@ -650,6 +652,9 @@ namespace vortex::graphics::sdlgpu
 		view.frame.ssao_padding[0] = 1.0f / (float)(target.width ? target.width : 1);
 		view.frame.ssao_padding[1] = 1.0f / (float)(target.height ? target.height : 1);
 		view.viewmodel.ssao_enabled = 0.0f;   // the first-person layer has no AO (own projection)
+		// screen-space GI (#257 step 1): only where the previous frame's copy exists at this size (the main view)
+		view.frame.gi_strength = (ssao_on && m_gi_enabled && m_gi_prev_valid && m_gi_prev_w == target.width && m_gi_prev_h == target.height) ? m_gi_strength : 0.0f;
+		view.viewmodel.gi_strength = 0.0f;
 		prepare_scene(view);
 		prepare_shadow_pass(view);
 		upload_dynamic(cmd);
@@ -722,7 +727,8 @@ namespace vortex::graphics::sdlgpu
 				m_decals.draw(cmd, target.color, target.depth, target.width, target.height, dv, penv);
 			}
 			m_scene_copy_valid = false;
-			if (m_transparent_runs_seen) copy_scene_for_transparents(cmd, target);
+			if (m_transparent_runs_seen || (m_gi_enabled && !draw_gizmo_pass)) copy_scene_for_transparents(cmd, target);   // the GI pass reads it next frame
+			if (m_scene_copy_valid) { m_gi_prev_view_projection = view.view_projection; m_gi_prev_w = target.width; m_gi_prev_h = target.height; m_gi_prev_valid = true; }
 			color.load_op = SDL_GPU_LOADOP_LOAD;
 			depth.load_op = SDL_GPU_LOADOP_LOAD;
 			pass = SDL_BeginGPURenderPass(cmd, &color, 1, &depth);

@@ -33,7 +33,7 @@ layout(set = SET_UNIFORM, binding = 0, std140) uniform PerFrameBlock
 	float scene_exposure;         // @156  pre-tonemap multiplier (0.5 = classic; <= 0 reads as 0.5)
 	float shadow_map_texel;       // @160
 	uint  tonemapper;             // @164  0 = ACES fit, 1 = PBR Neutral
-	uint  shadow_padding1;        // @168
+	float gi_strength;            // @168  screen-space GI: > 0 = u_ssao.rgb carries bounce light
 	uint  shadow_padding2;        // @172
 	float ssao_enabled;           // @176
 	float ssao_padding0;          // @180  AO UV scale x

@@ -33,7 +33,8 @@ struct PerFrame
     float scene_exposure;              // @156  pre-tonemap multiplier (0.5 = classic; <= 0 reads as 0.5)
     float shadow_map_texel;
     uint tonemapper;                   // @164  0 = ACES fit, 1 = PBR Neutral
-    uint shadow_padding[2];
+    float gi_strength;                 // @168  screen-space GI: > 0 = ssao_tex.rgb carries bounce light
+    uint shadow_padding1;
     float ssao_enabled;
     float ssao_padding[2];             // the AO UV scale
     float fog_sun_glow;                // @188  the sun's glow in the fog (0 = off)
@@ -367,7 +368,7 @@ static inline float macro_noise(float2 p)
 static inline float macro_variation(float2 world_xz)
 {
     float n = 0.65 * macro_noise(world_xz * 0.025) + 0.35 * macro_noise(world_xz * 0.11 + 7.3);
-    return 0.91 + 0.18 * n;
+    return 0.86 + 0.28 * n;
 }
 
 // The sky as a reflection (IBL step 2): an equirect of the sky with mips at texture(10), env_sky.w = 2 while bound,
@@ -429,9 +430,9 @@ fragment float4 PSMain(VSOut in [[stage_in]],
     float rough = 0.0;
     // detail: the layer's own normal map again at 7.3x finer tiling, fading out beyond ~28 m — close-up ripples and grain
     float cam_dist = length(float3(frame.camera_position) - in.world_pos);
-    float detail_w = saturate(1.0 - cam_dist / 28.0);
+    float detail_w = saturate(1.0 - cam_dist / 70.0);
     // far: beyond ~250 m blend to the layer's mean colour (the 2x2 mip = one texel per quadrant) and a flat normal
-    float far_w = saturate((cam_dist - 120.0) / 480.0);
+    float far_w = saturate((cam_dist - 260.0) / 640.0);
     for (int i = 0; i < 4; ++i)
     {
         float wi = w[i];
@@ -599,7 +600,9 @@ fragment float4 PSMain(VSOut in [[stage_in]],
     if (frame.ssao_enabled > 0.5)
     {
         float2 auv = in.pos.xy * float2(frame.ssao_padding[0], frame.ssao_padding[1]);
-        ambient *= ssao_tex.sample(ssao_smp, auv).r;
+        float4 ss = ssao_tex.sample(ssao_smp, auv);
+        ambient *= ss.a;
+        if (frame.gi_strength > 0.0) ambient += ss.rgb * ss.rgb * 4.0 * albedo * (1.0 - metallic) * ss.a;   // screen-space GI (#257 step 1)
     }
 
     float3 color = ambient + Lo;

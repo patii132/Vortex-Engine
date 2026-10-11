@@ -218,6 +218,8 @@ namespace vortex::graphics::dx12
 		void clear_lights();
 		// SSAO (#32): scene-look state like fog — shows in every view (editor + game). radius in
 		// world units, intensity 0..~2; enabled=false or intensity 0 = the pass never records.
+		// Screen-space GI (#257 step 1): one bounce traced in the SSAO pass (needs SSAO on).
+		void set_gi(bool enabled, float strength, float radius) { m_gi_enabled = enabled && strength > 0.001f; m_gi_strength = strength < 0.0f ? 0.0f : strength; m_gi_radius = radius < 0.25f ? 0.25f : radius; }
 		void set_ssao(bool enabled, float radius, float intensity)
 		{
 			m_ssao_enabled = enabled && intensity > 0.001f;
@@ -651,7 +653,8 @@ namespace vortex::graphics::dx12
 			// ShadowVP[4] tail; b0 only carries the atlas texel size (all tiles are the same size).
 			float shadow_map_texel;    // 1 / tile size (ready for a PCF kernel later)
 			u32 tonemapper;            // 0 = ACES fit (classic), 1 = Khronos PBR Neutral (hue-preserving)
-			u32 shadow_padding[2];
+			float gi_strength;         // screen-space GI (#257 step 1): > 0 = the AO texture's rgb carries bounce light to add
+			u32 shadow_padding1;
 			// SSAO (#32) — APPENDED @176. The standard PS samples t10 only when enabled > 0.5;
 			// the UV comes from SV_POSITION / (AO texture dims * 2), so no screen size travels here.
 			float ssao_enabled;
@@ -985,11 +988,11 @@ namespace vortex::graphics::dx12
 		struct SsaoView
 		{
 			ComPtr<ID3D12Resource> depth;               // R32_TYPELESS, half view res
-			ComPtr<ID3D12Resource> ao;                  // R8_UNORM raw AO
-			ComPtr<ID3D12Resource> blur;                // R8_UNORM blurred AO (sampled at t10)
+			ComPtr<ID3D12Resource> ao;                  // RGBA8 raw: rgb = screen-space GI, a = AO
+			ComPtr<ID3D12Resource> blur;                // RGBA8 blurred (sampled at t10)
 			ComPtr<ID3D12DescriptorHeap> dsv_heap;      // 1 DSV
 			ComPtr<ID3D12DescriptorHeap> rtv_heap;      // 2 RTVs (ao, blur)
-			ComPtr<ID3D12DescriptorHeap> srv_heap;      // 2 shader-visible SRVs (depth, ao) for the gen/blur passes
+			ComPtr<ID3D12DescriptorHeap> srv_heap;      // 3 shader-visible SRVs (depth, ao, the previous frame's colour) for the gen/blur passes
 			D3D12_RESOURCE_STATES depth_state{ D3D12_RESOURCE_STATE_DEPTH_WRITE };
 			D3D12_RESOURCE_STATES ao_state{ D3D12_RESOURCE_STATE_RENDER_TARGET };
 			D3D12_RESOURCE_STATES blur_state{ D3D12_RESOURCE_STATE_RENDER_TARGET };
@@ -1004,6 +1007,9 @@ namespace vortex::graphics::dx12
 		D3D12_CPU_DESCRIPTOR_HANDLE m_ssao_reserved_cpu[2]{};  // registry slots the scene pass samples (t10)
 		D3D12_GPU_DESCRIPTOR_HANDLE m_ssao_reserved_gpu[2]{};
 		D3D12_GPU_DESCRIPTOR_HANDLE m_ssao_current_srv{};      // what render_3d_scene binds this pass
+		// screen-space GI (#257 step 1): the previous frame's opaque colour copy (the particle module's) is the radiance source
+		bool m_gi_enabled{ false }; float m_gi_strength{ 1.0f }, m_gi_radius{ 2.5f };
+		DX12Particles::DepthCopy* m_gi_prev_copy{ nullptr }; u32 m_gi_prev_w{ 0 }, m_gi_prev_h{ 0 };
 		bool m_ssao_enabled{ false };
 		float m_ssao_radius{ 0.6f };
 		float m_ssao_intensity{ 1.0f };

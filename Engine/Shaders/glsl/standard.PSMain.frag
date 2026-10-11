@@ -405,7 +405,9 @@ void main()
 	if (frame.ssao_enabled > 0.5)
 	{
 		vec2 auv = gl_FragCoord.xy * vec2(frame.ssao_padding0, frame.ssao_padding1);
-		ambient *= texture(u_ssao, auv).r;
+		vec4 ss = texture(u_ssao, auv);
+		ambient *= ss.a;
+		if (frame.gi_strength > 0.0) ambient += ss.rgb * ss.rgb * 4.0 * albedo * (1.0 - metallic) * ss.a;   // screen-space GI (#257 step 1)
 	}
 
 	float rim_fresnel = pow(saturate(1.0 - NdotV), 5.0);

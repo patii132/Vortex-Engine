@@ -34,7 +34,8 @@ cbuffer PerFrame : register(b0)
     float SceneExposure;   // pre-tonemap multiplier (0.5 = the classic look; <= 0 reads as 0.5)
     float ShadowMapTexel;
     uint Tonemapper;       // 0 = ACES fit, 1 = PBR Neutral
-    uint2 ShadowPadding;
+    float GiStrength;      // screen-space GI: > 0 = SsaoTex.rgb carries bounce light
+    uint ShadowPadding1;
     float SsaoEnabled;
     float2 SsaoPadding;
     float FogSunGlow;      // aerial perspective: the sun's glow in the fog (0 = off)

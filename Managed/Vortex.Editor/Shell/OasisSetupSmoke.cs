@@ -107,13 +107,13 @@ namespace VortexEditor.Shell
             // the late afternoon of the syferfontein pure sky (18.2° up, azimuth 216° — tools/hdri-analyze.py): long palm shadows,
             // the sun's glow in the haze; the goegap noon stays the "noon" weather preset
             sun.Transform.LocalRotation = new Vector3(18.19f, -144.05f, 0f);
-            sun.AddComponentDirect(new Light(sun, LightType.Directional) { Intensity = 5.0f, ColorR = 1f, ColorG = 0.90f, ColorB = 0.70f, ShadowType = ShadowType.Soft });
+            sun.AddComponentDirect(new Light(sun, LightType.Directional) { Intensity = 5.5f, ColorR = 1f, ColorG = 0.95f, ColorB = 0.85f, ShadowType = ShadowType.Soft });   // a late sun, but not orange: the sand must stay golden, not pink
 
             // ---- the sky: the desert HDRI; the gradient colours are its environment (reflections, the lakes' sky) ----
             var sky = scene.CreateEntity("Sky");
             sky.AddComponentDirect(new Skybox(sky)
             {
-                IsEnabled = true, SkyboxType = SkyboxType.Texture, TexturePath = "Assets/Skies/syferfontein_18d_clear_puresky_2k.hdr", Exposure = 1.0f, AmbientIntensity = 1.25f,
+                IsEnabled = true, SkyboxType = SkyboxType.Texture, TexturePath = "Assets/Skies/syferfontein_18d_clear_puresky_2k.hdr", Exposure = 1.0f, AmbientIntensity = 0.9f,
                 TopColorR = 0.25f, TopColorG = 0.42f, TopColorB = 0.85f,
                 HorizonColorR = 0.95f, HorizonColorG = 0.88f, HorizonColorB = 0.75f,
                 BottomColorR = 0.60f, BottomColorG = 0.50f, BottomColorB = 0.35f
@@ -199,7 +199,10 @@ namespace VortexEditor.Shell
                 rig.Name = "Player";
                 rig.PrefabPath = null;   // its own entity now, not a linked instance
                 rig.AddComponentDirect(new Script(rig, "Assets/Scripts/Player/Footprints.cs"));   // boot prints in the sand
-                rig.Transform.LocalPosition = new Vector3(24f, startY + 1.2f, -10f);
+                // the rig's entity sits at EYE height (CoDMovement: feet = Position.Y - 1.7): 1.2 m put the feet half a metre
+                // under the sand, and with the far dunes' sheet 1.2 m below the oasis the capsule was sandwiched between two
+                // terrains and pushed through both ("man fällt durch den Boden", 2026-10-11)
+                rig.Transform.LocalPosition = new Vector3(24f, startY + 1.9f, -10f);
                 rig.Transform.LocalRotation = new Vector3(0f, -60f, 0f);
                 SetFarClip(rig, 6000f);   // the far dunes and the mountains are 2 km out
                 log.Log("oasis setup: the Tactical player rig stands on the strip between the lakes");
@@ -248,12 +251,13 @@ namespace VortexEditor.Shell
             var st = scene.Settings;
             st.Tonemapper = 1;         // PBR Neutral: the sand stays orange, the sky blue — the ACES fit washed both towards white
             st.AntiAliasEnabled = true;   // FXAA: the fronds and the ripples stop flickering
-            st.BounceStrength = 0.55f; st.BounceR = 0.60f; st.BounceG = 0.42f; st.BounceB = 0.26f;   // the sand's warm bounce into the shadows
-            st.SceneExposure = 2.6f;   // stops before the tonemapper: the low sun needs more aperture than noon (the sand stays bright, the shadows sky-lit)
-            st.FogEnabled = true; st.FogDensity = 0.0007f; st.FogHeightY = -4f; st.FogHeightFalloff = 0.012f;
-            st.FogR = 0.52f; st.FogG = 0.50f; st.FogB = 0.50f; st.FogSunGlow = 0.6f;   // the warm late-afternoon haze, glowing towards the low sun
-            st.GradeEnabled = true; st.Exposure = 0f; st.Contrast = 1.08f; st.Saturation = 1.15f; st.Temperature = 0.08f; st.Tint = 0.0f;
+            st.BounceStrength = 1.0f; st.BounceR = 0.60f; st.BounceG = 0.42f; st.BounceB = 0.26f;   // the sand's warm bounce into the shadows (the reference's shadows are orange, not grey)
+            st.SceneExposure = 2.2f;   // stops before the tonemapper: the low sun needs more aperture than noon; 2.6 clipped the crowns and the far dunes to white
+            st.FogEnabled = true; st.FogDensity = 0.0010f; st.FogHeightY = -4f; st.FogHeightFalloff = 0.012f;
+            st.FogR = 0.60f; st.FogG = 0.64f; st.FogB = 0.72f; st.FogSunGlow = 0.5f;   // the reference's far dunes fade to a neutral, slightly cool white — a warm haze turned them salmon
+            st.GradeEnabled = true; st.Exposure = 0f; st.Contrast = 1.05f; st.Saturation = 1.0f; st.Temperature = 0.0f; st.Tint = 0.0f;   // the reference is NOT saturated: the sand golden, the palms olive, the shadows warm
             st.AoEnabled = true; st.AoRadius = 0.8f; st.AoIntensity = 0.9f;
+            st.GiEnabled = true; st.GiStrength = 0.6f; st.GiRadius = 3.0f;   // screen-space GI: the sand's light on the trunks and the undergrowth
             st.BloomEnabled = true; st.BloomThreshold = 0.95f; st.BloomIntensity = 0.3f; st.BloomScatter = 0.6f;
             // sun shafts through the palms: a thin volumetric haze marched 160 m, strongly forward-scattering
             st.VolumetricEnabled = true; st.VolumetricDensity = 0.0025f; st.VolumetricAnisotropy = 0.75f; st.VolumetricDistance = 120f;
@@ -392,8 +396,9 @@ namespace VortexEditor.Shell
             {
                 Size = size, CellSize = 1f,
                 // the body colours are albedos (lit by sky + sun, then exposed): the reference's dark green needs 0.03–0.15
-                DeepR = 0.006f, DeepG = 0.035f, DeepB = 0.028f, ShallowR = 0.035f, ShallowG = 0.15f, ShallowB = 0.11f,
-                Absorption = 2.5f, Reflection = 0.6f, Roughness = 0.06f, WaveScale = 9f, WaveSpeed = 0.5f, WaveHeight = 0.06f, FoamWidth = 0.45f, DefaultDepth = 3f
+                DeepR = 0.004f, DeepG = 0.022f, DeepB = 0.016f, ShallowR = 0.025f, ShallowG = 0.09f, ShallowB = 0.06f,
+                // dark green water that mirrors the palms and the sky; gentle ripples (a strong ripple normal painted the lake in white sky stripes)
+                Absorption = 2.5f, Reflection = 0.7f, Roughness = 0.06f, WaveScale = 9f, WaveSpeed = 0.5f, WaveHeight = 0.035f, FoamWidth = 0.45f, DefaultDepth = 3f
             });
         }
 
@@ -687,6 +692,13 @@ namespace VortexEditor.Shell
                         if (d < best) { best = d; nearest = e; }
                     }
                     int count = 0; foreach (var e in scene.Entities) if (e != null && e.Name.StartsWith("Zombie", StringComparison.Ordinal) && e.GetComponent<Script>() != null) count++;
+                    {
+                        // the player must stand on the sand, not fall through it (reported 2026-10-11)
+                        float gy; bool onTer = TerrainService.TryHeight(ter, pp.X, pp.Z, out gy);
+                        float dyp = onTer ? pp.Y - gy : float.NaN;
+                        if (!onTer || dyp < -0.5f || dyp > 6f) log.LogError("oasis play: the player is " + (onTer ? dyp.ToString("0.00") + " m above the ground" : "off the terrain") + " after 6.5 s of play (y " + pp.Y.ToString("0.00") + ") — fell through?");
+                        else log.Log("oasis play: the player stands " + dyp.ToString("0.00") + " m above the ground after 6.5 s of play (y " + pp.Y.ToString("0.00") + ")");
+                    }
                     // the game camera renders in play: the infected come into the player's view on their own
                     await CameraSkySmoke.Sample("oasis_zombie.bmp", 0.5, 0.5);
                     log.Log("oasis capture: " + count + " zombies in play, nearest " + (nearest != null ? best.ToString("0") + " m from the player" : "none"));
@@ -770,6 +782,7 @@ namespace VortexEditor.Shell
             if (fol != null) { fol.IsActive = false; await Read("no vegetation"); fol.IsActive = true; }
             if (far != null) { far.IsActive = false; await Read("no far dunes"); far.IsActive = true; }
             foreach (var l in lakes) l.IsActive = false; await Read("no water"); await Read("no water (2nd read)"); foreach (var l in lakes) l.IsActive = true;
+            bool gi = st.GiEnabled; st.GiEnabled = false; st.Apply(); await Read("no GI"); st.GiEnabled = gi; st.Apply();
             bool ao = st.AoEnabled, bloom = st.BloomEnabled; st.AoEnabled = false; st.BloomEnabled = false; st.Apply(); await Read("no SSAO + bloom"); st.AoEnabled = ao; st.BloomEnabled = bloom; st.Apply();
             EditorViewportSession.RequestResubmit();
             await SmokeRegistry.Settle(800);

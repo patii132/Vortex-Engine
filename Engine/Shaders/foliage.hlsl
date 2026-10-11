@@ -33,7 +33,8 @@ cbuffer PerFrame : register(b0)
     // light buffer; b0 only carries the atlas tile texel size (all tiles are the same size).
     float ShadowMapTexel;
     uint Tonemapper;       // 0 = ACES fit, 1 = PBR Neutral
-    uint2 ShadowPadding;
+    float GiStrength;      // screen-space GI: > 0 = SsaoTex.rgb carries bounce light
+    uint ShadowPadding1;
     // SSAO (#32) — APPENDED @176, byte-matched to PerFrameConstants. Screen UV is derived from
     // SV_POSITION and the AO texture's own dimensions, so no screen size travels here.
     float SsaoEnabled;
@@ -712,7 +713,10 @@ float4 PSMain(PS_IN input, bool isFront : SV_IsFrontFace) : SV_TARGET
         float aoW, aoH;
         SsaoTex.GetDimensions(aoW, aoH);
         float2 aoUV = input.pos.xy / float2(aoW * 2.0, aoH * 2.0);
-        ambient *= SsaoTex.Sample(ScreenSampler, aoUV).r;
+        float4 ss = SsaoTex.Sample(ScreenSampler, aoUV);
+        ambient *= ss.a;
+        // screen-space GI (#257 step 1): one bounce of the lit world (sqrt-encoded radiance, x4 range) onto this surface
+        if (GiStrength > 0.0) ambient += ss.rgb * ss.rgb * 4.0 * albedo * (1.0 - metallic) * ss.a;
     }
 
     float3 color = ambient + Lo;

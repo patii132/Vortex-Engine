@@ -36,7 +36,7 @@ layout(set = SET_UNIFORM, binding = 0, std140) uniform PerFrameBlock
 	float scene_exposure;         // @156  pre-tonemap multiplier (0.5 = classic; <= 0 reads as 0.5)
 	float shadow_map_texel;
 	uint  tonemapper;             // 0 = ACES fit, 1 = PBR Neutral
-	uint  shadow_padding1;
+	float gi_strength;            // screen-space GI: > 0 = u_ssao.rgb carries bounce light
 	uint  shadow_padding2;
 	float ssao_enabled;
 	float ssao_padding0;
@@ -391,7 +391,7 @@ float macro_noise(vec2 p)
 float macro_variation(vec2 world_xz)
 {
 	float n = 0.65 * macro_noise(world_xz * 0.025) + 0.35 * macro_noise(world_xz * 0.11 + 7.3);
-	return 0.91 + 0.18 * n;
+	return 0.86 + 0.28 * n;
 }
 
 // The sky as a reflection (IBL step 2): an equirect of the sky with mips at binding 10, env_sky.w = 2 while bound,
@@ -431,9 +431,9 @@ void main()
 	float rough = 0.0;
 	// detail: the layer's own normal map again at 7.3x finer tiling, fading out beyond ~28 m — close-up ripples and grain
 	float cam_dist = length(frame.camera_position - v_world_pos);
-	float detail_w = clamp(1.0 - cam_dist / 28.0, 0.0, 1.0);
+	float detail_w = clamp(1.0 - cam_dist / 70.0, 0.0, 1.0);
 	// far: beyond ~250 m blend to the layer's mean colour (the 2x2 mip = one texel per quadrant) and a flat normal
-	float far_w = clamp((cam_dist - 120.0) / 480.0, 0.0, 1.0);
+	float far_w = clamp((cam_dist - 260.0) / 640.0, 0.0, 1.0);
 	for (int i = 0; i < 4; ++i)
 	{
 		float wi = w[i];
@@ -599,7 +599,9 @@ void main()
 	if (frame.ssao_enabled > 0.5)
 	{
 		vec2 auv = gl_FragCoord.xy * vec2(frame.ssao_padding0, frame.ssao_padding1);
-		ambient *= texture(u_ssao, auv).r;
+		vec4 ss = texture(u_ssao, auv);
+		ambient *= ss.a;
+		if (frame.gi_strength > 0.0) ambient += ss.rgb * ss.rgb * 4.0 * albedo * (1.0 - metallic) * ss.a;   // screen-space GI (#257 step 1)
 	}
 
 	vec3 color = ambient + Lo;

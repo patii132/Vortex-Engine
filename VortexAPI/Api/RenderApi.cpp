@@ -695,6 +695,13 @@ EDITOR_INTERFACE void SetSSAO(bool enabled, float radius, float intensity)
 	r.set_ssao(enabled, radius, intensity);
 }
 
+// Screen-space global illumination (#257 step 1): one bounce of the lit world traced in the SSAO pass (needs SSAO on).
+// strength scales the bounce (1 = physical for a diffuse bounce), radius = the trace length in metres.
+EDITOR_INTERFACE void SetGlobalIllumination(bool enabled, float strength, float radius)
+{
+	graphics::Renderer::instance().set_gi(enabled, strength, radius);
+}
+
 // Main-view gate: post-FX in the PRIMARY swapchain. The GameHost player enables it at boot (there the
 // main view IS the game); the editor leaves it off so the freecam build viewport stays clean (its
 // Environment panel may toggle it for a preview). The play-mode game window always applies effects.

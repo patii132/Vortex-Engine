@@ -1982,6 +1982,10 @@ namespace Vortex
         /// warms around the sun. 0 = the flat fog colour, 0.3–0.6 a desert noon, 1–2 a low sun.</summary>
         public static void SetFogSunGlow(float glow) { Editor.DllWrapper.VortexAPI.SetFogSunGlowStrength(glow); }
 
+        /// <summary>Screen-space global illumination (dynamic GI, step 1): one bounce of the lit world traced against the depth
+        /// with the previous frame's light. Needs SSAO on. strength 1 = a physical diffuse bounce; radius = the trace length (m).</summary>
+        public static void SetGlobalIllumination(bool enabled, float strength = 1f, float radius = 2.5f) { Editor.DllWrapper.VortexAPI.SetGlobalIllumination(enabled, strength, radius); }
+
         /// <summary>Volumetric fog (#119): the air itself scatters light towards the camera — the flashlight becomes a visible
         /// cone, point lights glow, the sun throws shafts, all stopped by the shadow maps. <paramref name="density"/> scales the
         /// scattering (the height profile and colour come from <see cref="SetFog"/>, which may stay at density 0),

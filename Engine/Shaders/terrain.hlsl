@@ -36,7 +36,8 @@ cbuffer PerFrame : register(b0)
     float SceneExposure;   // pre-tonemap multiplier (0.5 = the classic look; <= 0 reads as 0.5)
     float ShadowMapTexel;
     uint Tonemapper;       // 0 = ACES fit, 1 = PBR Neutral
-    uint2 ShadowPadding;
+    float GiStrength;      // screen-space GI: > 0 = SsaoTex.rgb carries bounce light
+    uint ShadowPadding1;
     float SsaoEnabled;
     float2 SsaoPadding;
     float FogSunGlow;      // aerial perspective: the sun's glow in the fog (0 = off)
@@ -401,7 +402,7 @@ float MacroNoise(float2 p)
 float MacroVariation(float2 worldXZ)
 {
     float n = 0.65 * MacroNoise(worldXZ * 0.025) + 0.35 * MacroNoise(worldXZ * 0.11 + 7.3);
-    return 0.91 + 0.18 * n;
+    return 0.86 + 0.28 * n;
 }
 
 // The sky as a reflection (IBL step 2): an equirect of the sky with mips at t11, EnvSky.w = 2 while bound, EnvHorizon.w =
@@ -450,10 +451,10 @@ float4 PSMain(PS_IN input) : SV_TARGET
     float rough = 0.0;
     // detail: the layer's own normal map again at 7.3x finer tiling, fading out beyond ~28 m — close-up ripples and grain
     float camDist = length(CameraPosition - input.worldPos);
-    float detailW = saturate(1.0 - camDist / 28.0);
+    float detailW = saturate(1.0 - camDist / 70.0);
     // far: beyond ~250 m a tile is below the pixel — blend to the layer's mean colour and a flat normal (the 2x2 mip holds
     // exactly one texel per quadrant); the capped mip would otherwise shimmer with every camera move
-    float farW = saturate((camDist - 120.0) / 480.0);
+    float farW = saturate((camDist - 260.0) / 640.0);
     [unroll]
     for (int i = 0; i < 4; ++i)
     {
@@ -625,7 +626,10 @@ float4 PSMain(PS_IN input) : SV_TARGET
         float aoW, aoH;
         SsaoTex.GetDimensions(aoW, aoH);
         float2 aoUV = input.pos.xy / float2(aoW * 2.0, aoH * 2.0);
-        ambient *= SsaoTex.Sample(ScreenSampler, aoUV).r;
+        float4 ss = SsaoTex.Sample(ScreenSampler, aoUV);
+        ambient *= ss.a;
+        // screen-space GI (#257 step 1): one bounce of the lit world (sqrt-encoded radiance, x4 range) onto this surface
+        if (GiStrength > 0.0) ambient += ss.rgb * ss.rgb * 4.0 * albedo * (1.0 - metallic) * ss.a;
     }
 
     float3 color = ambient + Lo;

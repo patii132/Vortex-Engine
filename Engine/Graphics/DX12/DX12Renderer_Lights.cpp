@@ -37,6 +37,7 @@ namespace vortex::graphics::dx12
 	// SSAO (#32): the standard PS samples t10 only when this is set; if a view's record_ssao
 	// can't run, its reserved t10 slot still holds a valid (stale/neutral) texture.
 	m_frame_constants.ssao_enabled = (m_ssao_enabled && m_ssao_pso) ? 1.0f : 0.0f;
+	m_frame_constants.gi_strength = (m_ssao_enabled && m_ssao_pso && m_gi_enabled) ? m_gi_strength : 0.0f;   // screen-space GI rides the AO texture
 	{
 		const float env_on = (m_skybox_enabled && (m_skybox_mode == SkyboxMode::Gradient || m_skybox_mode == SkyboxMode::Texture)) ? 1.0f : 0.0f;
 		const bool env_map = env_on > 0.5f && m_env_map != id::invalid_id && m_env_mips > 0;

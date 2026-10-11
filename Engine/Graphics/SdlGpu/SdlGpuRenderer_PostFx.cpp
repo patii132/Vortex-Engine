@@ -26,8 +26,11 @@ namespace vortex::graphics::sdlgpu
 			float texel[2];
 			float radius, intensity, bias, proj_scale;
 			float pad[2];
+			// screen-space GI (#257 step 1)
+			DirectX::XMFLOAT4X4 proj, view_to_prev_clip;
+			float gi_strength, scene_exposure, prev_valid, gi_radius;
 		};
-		static_assert(sizeof(SsaoCB) == 96, "SsaoCB must byte-match ssao.metal");
+		static_assert(sizeof(SsaoCB) == 240, "SsaoCB must byte-match ssao.metal");
 
 		struct BloomCB
 		{
@@ -107,15 +110,15 @@ namespace vortex::graphics::sdlgpu
 		if (m_post_ready) return true;
 		if (!m_device || !m_pipeline_shadow) return false;
 		m_vs_ssao = create_shader("ssao", "SsaoVS", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0);
-		m_fs_ssao = create_shader("ssao", "SsaoPS", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0, 1);
+		m_fs_ssao = create_shader("ssao", "SsaoPS", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 0, 1);   // depth + the previous frame's colour (GI)
 		m_fs_ssao_blur = create_shader("ssao", "SsaoBlurPS", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0, 1);
 		m_vs_bloom = create_shader("bloom", "BloomVS", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0);
 		m_fs_bloom_prefilter = create_shader("bloom", "BloomPrefilterPS", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0, 1);
 		m_fs_bloom_down = create_shader("bloom", "BloomDownsamplePS", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0, 1);
 		m_fs_bloom_up = create_shader("bloom", "BloomUpsamplePS", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0, 1);
 		if (!m_vs_ssao || !m_fs_ssao || !m_fs_ssao_blur || !m_vs_bloom || !m_fs_bloom_prefilter || !m_fs_bloom_down || !m_fs_bloom_up) { destroy_postfx_resources(); return false; }
-		m_pipeline_ssao = create_post_pipeline(m_vs_ssao, m_fs_ssao, SDL_GPU_TEXTUREFORMAT_R8_UNORM, false);
-		m_pipeline_ssao_blur = create_post_pipeline(m_vs_ssao, m_fs_ssao_blur, SDL_GPU_TEXTUREFORMAT_R8_UNORM, false);
+		m_pipeline_ssao = create_post_pipeline(m_vs_ssao, m_fs_ssao, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, false);   // rgb = GI, a = AO
+		m_pipeline_ssao_blur = create_post_pipeline(m_vs_ssao, m_fs_ssao_blur, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, false);
 		m_pipeline_bloom_prefilter = create_post_pipeline(m_vs_bloom, m_fs_bloom_prefilter, m_scene_format, false);
 		m_pipeline_bloom_down = create_post_pipeline(m_vs_bloom, m_fs_bloom_down, m_scene_format, false);
 		m_pipeline_bloom_up = create_post_pipeline(m_vs_bloom, m_fs_bloom_up, m_scene_format, true);
@@ -165,8 +168,8 @@ namespace vortex::graphics::sdlgpu
 		SsaoSet s{};
 		s.w = w; s.h = h;
 		s.depth = make_texture(m_device, w, h, m_depth_format, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
-		s.ao = make_texture(m_device, w, h, SDL_GPU_TEXTUREFORMAT_R8_UNORM, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
-		s.blur = make_texture(m_device, w, h, SDL_GPU_TEXTUREFORMAT_R8_UNORM, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
+		s.ao = make_texture(m_device, w, h, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);   // rgb = GI, a = AO
+		s.blur = make_texture(m_device, w, h, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
 		if (!s.depth || !s.ao || !s.blur) { log(std::string("SSAO targets failed: ") + SDL_GetError()); if (s.depth) SDL_ReleaseGPUTexture(m_device, s.depth); if (s.ao) SDL_ReleaseGPUTexture(m_device, s.ao); if (s.blur) SDL_ReleaseGPUTexture(m_device, s.blur); return nullptr; }
 		m_ssao_sets.push_back(s);
 		return &m_ssao_sets.back();
@@ -279,6 +282,14 @@ namespace vortex::graphics::sdlgpu
 		cb.texel[0] = 1.0f / (float)hw; cb.texel[1] = 1.0f / (float)hh;
 		cb.radius = m_ssao_radius; cb.intensity = m_ssao_intensity; cb.bias = 0.015f;
 		cb.proj_scale = 0.5f * XMVectorGetY(proj.r[1]) * (float)hh;
+		// screen-space GI (#257 step 1): the previous frame's opaque copy at this size is the radiance source
+		const bool gi_prev = m_gi_enabled && m_gi_prev_valid && m_scene_color_copy && m_gi_prev_w == target_w && m_gi_prev_h == target_h;
+		XMStoreFloat4x4(&cb.proj, proj);
+		XMStoreFloat4x4(&cb.view_to_prev_clip, proj * XMLoadFloat4x4(&view.inverse_view_projection) * XMLoadFloat4x4(&m_gi_prev_view_projection));
+		cb.gi_strength = m_gi_enabled ? m_gi_strength : 0.0f; cb.scene_exposure = view.frame.scene_exposure > 0.0f ? view.frame.scene_exposure : 0.5f;
+		cb.prev_valid = gi_prev ? 1.0f : 0.0f; cb.gi_radius = m_gi_radius;
+		auto& regw = ResourceRegistry::instance(); Texture* whitep = regw.white_texture();
+		SDL_GPUTexture* prev_tex = gi_prev ? m_scene_color_copy : (whitep ? whitep->texture() : nullptr);
 		auto fullscreen = [&](SDL_GPUTexture* dst, SDL_GPUGraphicsPipeline* pipeline, SDL_GPUTexture* src, SDL_GPUSampler* smp)
 		{
 			SDL_GPUColorTargetInfo color{};
@@ -288,8 +299,8 @@ namespace vortex::graphics::sdlgpu
 			SDL_BindGPUGraphicsPipeline(pass, pipeline);
 			SDL_GPUViewport vp{ 0, 0, (float)hw, (float)hh, 0.0f, 1.0f };
 			SDL_SetGPUViewport(pass, &vp);
-			SDL_GPUTextureSamplerBinding b{ src, smp };
-			SDL_BindGPUFragmentSamplers(pass, 0, &b, 1);
+			SDL_GPUTextureSamplerBinding b[2] = { { src, smp }, { prev_tex ? prev_tex : src, m_sampler_linear_clamp } };
+			SDL_BindGPUFragmentSamplers(pass, 0, b, pipeline == m_pipeline_ssao ? 2u : 1u);
 			SDL_PushGPUFragmentUniformData(cmd, 0, &cb, sizeof(cb));
 			SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
 			SDL_EndGPURenderPass(pass);

@@ -16,9 +16,17 @@ cbuffer SsaoCB : register(b0)
     float  Bias;                  // self-occlusion guard (view-space units)
     float  ProjScale;             // 0.5 * proj._22 * targetHeight — world radius -> pixels at z=1
     float2 _padS;
+    // screen-space GI (#257 step 1) — appended @96
+    row_major float4x4 Proj;          // view -> clip (this view's projection)
+    row_major float4x4 ViewToPrevClip; // view -> the previous frame's clip (reprojection into PrevColor)
+    float  GiStrength;            // 0 = AO only
+    float  SceneExposure;         // the pre-tonemap multiplier the previous frame was rendered with
+    float  PrevValid;             // 1 = PrevColor holds last frame's opaque picture at this view's size
+    float  GiRadius;              // world-space trace length (m)
 };
 
-Texture2D    Src : register(t0);   // PSMain: AO depth (R32_FLOAT). PSBlur: raw AO (R8_UNORM).
+Texture2D    Src : register(t0);   // PSMain: AO depth (R32_FLOAT). PSBlur: raw AO + GI (RGBA8).
+Texture2D    PrevColor : register(t1);   // PSMain: the previous frame's opaque colour (LDR, tonemapped)
 SamplerState Smp : register(s0);   // point/clamp — depth must not be filtered
 
 struct VS_OUT
@@ -84,16 +92,68 @@ float4 PSMain(VS_OUT i) : SV_TARGET
         occlusion += max(0.0, dot(v, N) - Bias) / (dot(v, v) + 0.01);
     }
     float ao = saturate(1.0 - Intensity * occlusion * (2.0 / (float)TAPS));
-    return float4(ao, ao, ao, 1.0);
+
+    // ---- screen-space GI: a few cosine-weighted rays from P against the same depth; a hit's radiance comes from the
+    // previous frame's picture, reprojected (the LDR output decoded back to pre-tonemap radiance) ----
+    float3 gi = float3(0.0, 0.0, 0.0);
+    if (GiStrength > 0.0 && PrevValid > 0.5)
+    {
+        float3 up = abs(N.y) < 0.99 ? float3(0, 1, 0) : float3(1, 0, 0);
+        float3 T = normalize(cross(up, N)), B = cross(N, T);
+        float h2 = Hash12(i.pos.yx + 7.31);
+        const int DIRS = 6, STEPS = 6;
+        float hits = 0.0;
+        [unroll]
+        for (int k = 0; k < DIRS; ++k)
+        {
+            float u1 = frac(rot * 0.159155 + (float)k * 0.618034), u2 = frac(h2 + (float)k * 0.381966);
+            float rr = sqrt(u1), ph = 6.2831853 * u2;
+            float3 dir = T * (rr * cos(ph)) + B * (rr * sin(ph)) + N * sqrt(max(0.0, 1.0 - u1));
+            float3 pos = P;
+            float step = GiRadius / (float)STEPS * (0.6 + 0.8 * u2);
+            [unroll]
+            for (int s = 0; s < STEPS; ++s)
+            {
+                pos += dir * step * (1.0 + 0.35 * (float)s);
+                float4 c = mul(float4(pos, 1.0), Proj);
+                if (c.w <= 0.01) break;
+                float2 uv = float2(c.x / c.w * 0.5 + 0.5, 0.5 - c.y / c.w * 0.5);
+                if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) break;
+                float sd = Src.SampleLevel(Smp, uv, 0).r;
+                if (sd >= 0.9999) continue;
+                float3 S = ViewPos(uv);
+                float dz = pos.z - S.z;
+                if (dz > 0.03 && dz < step * 2.5)
+                {
+                    if (dot(normalize(S - P), N) < 0.2) break;   // grazing the surface itself (a slope): not a bounce
+                    float4 pc = mul(float4(S, 1.0), ViewToPrevClip);
+                    if (pc.w > 0.01)
+                    {
+                        float2 puv = float2(pc.x / pc.w * 0.5 + 0.5, 0.5 - pc.y / pc.w * 0.5);
+                        if (puv.x >= 0.0 && puv.x <= 1.0 && puv.y >= 0.0 && puv.y <= 1.0)
+                        {
+                            float3 lin = pow(max(PrevColor.SampleLevel(Smp, puv, 0).rgb, 0.0), 2.2);
+                            float3 rad = lin / max(1.0 - 0.6 * lin, 0.25) / max(SceneExposure, 0.05);
+                            gi += rad; hits += 1.0;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        gi *= GiStrength / (float)DIRS;
+        float gl = dot(gi, float3(0.2126, 0.7152, 0.0722));
+        gi = lerp(float3(gl, gl, gl), gi, 0.65);   // a bounce is never as saturated as the albedo squared suggests
+    }
+    return float4(sqrt(saturate(gi * 0.25)), ao);
 }
 
 float4 PSBlur(VS_OUT i) : SV_TARGET
 {
-    float s = 0.0;
-    s += Src.SampleLevel(Smp, i.uv + TexelSize * float2(-0.5, -0.5), 0).r;
-    s += Src.SampleLevel(Smp, i.uv + TexelSize * float2( 1.5, -0.5), 0).r;
-    s += Src.SampleLevel(Smp, i.uv + TexelSize * float2(-0.5,  1.5), 0).r;
-    s += Src.SampleLevel(Smp, i.uv + TexelSize * float2( 1.5,  1.5), 0).r;
-    float ao = s * 0.25;
-    return float4(ao, ao, ao, 1.0);
+    float4 s = float4(0.0, 0.0, 0.0, 0.0);
+    s += Src.SampleLevel(Smp, i.uv + TexelSize * float2(-0.5, -0.5), 0);
+    s += Src.SampleLevel(Smp, i.uv + TexelSize * float2( 1.5, -0.5), 0);
+    s += Src.SampleLevel(Smp, i.uv + TexelSize * float2(-0.5,  1.5), 0);
+    s += Src.SampleLevel(Smp, i.uv + TexelSize * float2( 1.5,  1.5), 0);
+    return s * 0.25;   // rgb = GI, a = AO
 }

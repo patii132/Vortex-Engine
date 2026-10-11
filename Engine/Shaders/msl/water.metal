@@ -29,7 +29,8 @@ struct PerFrame
     float scene_exposure;              // @156  pre-tonemap multiplier (0.5 = classic; <= 0 reads as 0.5)
     float shadow_map_texel;
     uint tonemapper;                   // @164  0 = ACES fit, 1 = PBR Neutral
-    uint shadow_padding[2];
+    float gi_strength;                 // @168  screen-space GI: > 0 = ssao_tex.rgb carries bounce light
+    uint shadow_padding1;
     float ssao_enabled;
     float ssao_padding[2];             // the AO UV scale
     float fog_sun_glow;                // @188  the sun's glow in the fog (0 = off)

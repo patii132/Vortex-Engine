@@ -64,8 +64,11 @@ namespace vortex::graphics::dx12
 			float bias;
 			float proj_scale;
 			float pad[2];
+			// screen-space GI (#257 step 1)
+			DirectX::XMFLOAT4X4 proj, view_to_prev_clip;
+			float gi_strength, scene_exposure, prev_valid, gi_radius;
 		};
-		static_assert(sizeof(SsaoCB) == 96, "SsaoCB must byte-match ssao.hlsl (24 root constants)");
+		static_assert(sizeof(SsaoCB) == 240, "SsaoCB must byte-match ssao.hlsl (60 root constants)");
 
 		using PFN_D3D12SerializeRootSignature = HRESULT(WINAPI*)(const D3D12_ROOT_SIGNATURE_DESC*, D3D_ROOT_SIGNATURE_VERSION, ID3DBlob**, ID3DBlob**);
 		PFN_D3D12SerializeRootSignature get_serialize_root_signature_ssao()
@@ -101,8 +104,12 @@ namespace vortex::graphics::dx12
 			range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
 			range.NumDescriptors = 1;
 			range.BaseShaderRegister = 0;
+			D3D12_DESCRIPTOR_RANGE range_prev{};   // t1: the previous frame's colour (GI)
+			range_prev.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+			range_prev.NumDescriptors = 1;
+			range_prev.BaseShaderRegister = 1;
 
-			D3D12_ROOT_PARAMETER params[2]{};
+			D3D12_ROOT_PARAMETER params[3]{};
 			params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 			params[0].DescriptorTable.NumDescriptorRanges = 1;
 			params[0].DescriptorTable.pDescriptorRanges = &range;
@@ -111,6 +118,10 @@ namespace vortex::graphics::dx12
 			params[1].Constants.ShaderRegister = 0;
 			params[1].Constants.Num32BitValues = sizeof(SsaoCB) / 4;
 			params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+			params[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+			params[2].DescriptorTable.NumDescriptorRanges = 1;
+			params[2].DescriptorTable.pDescriptorRanges = &range_prev;
+			params[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
 			D3D12_STATIC_SAMPLER_DESC smp{};
 			smp.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;   // depth must not be filtered
@@ -120,7 +131,7 @@ namespace vortex::graphics::dx12
 			smp.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
 			D3D12_ROOT_SIGNATURE_DESC rs{};
-			rs.NumParameters = 2;
+			rs.NumParameters = 3;
 			rs.pParameters = params;
 			rs.NumStaticSamplers = 1;
 			rs.pStaticSamplers = &smp;
@@ -150,7 +161,7 @@ namespace vortex::graphics::dx12
 			pso.DepthStencilState.DepthEnable = FALSE;
 			pso.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 			pso.NumRenderTargets = 1;
-			pso.RTVFormats[0] = DXGI_FORMAT_R8_UNORM;
+			pso.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;   // rgb = GI, a = AO
 			pso.DSVFormat = DXGI_FORMAT_UNKNOWN;
 			pso.SampleDesc.Count = 1;
 			if (FAILED(dev->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&m_ssao_pso)))) return false;
@@ -203,13 +214,13 @@ namespace vortex::graphics::dx12
 			v.depth_state = D3D12_RESOURCE_STATE_DEPTH_WRITE;
 		}
 
-		// AO + blur color targets (R8_UNORM).
+		// AO + GI color targets (RGBA8: rgb = screen-space GI, a = AO).
 		{
 			D3D12_RESOURCE_DESC rd{};
 			rd.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
 			rd.Width = hw; rd.Height = hh;
 			rd.DepthOrArraySize = 1; rd.MipLevels = 1;
-			rd.Format = DXGI_FORMAT_R8_UNORM;
+			rd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 			rd.SampleDesc.Count = 1;
 			rd.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 			v.ao.Reset(); v.blur.Reset();
@@ -229,7 +240,7 @@ namespace vortex::graphics::dx12
 			if (FAILED(dev->CreateDescriptorHeap(&dh, IID_PPV_ARGS(&v.dsv_heap)))) return false;
 			dh.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV; dh.NumDescriptors = 2;
 			if (FAILED(dev->CreateDescriptorHeap(&dh, IID_PPV_ARGS(&v.rtv_heap)))) return false;
-			dh.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV; dh.NumDescriptors = 2;
+			dh.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV; dh.NumDescriptors = 3;
 			dh.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 			if (FAILED(dev->CreateDescriptorHeap(&dh, IID_PPV_ARGS(&v.srv_heap)))) return false;
 		}
@@ -255,7 +266,7 @@ namespace vortex::graphics::dx12
 		auto srv1 = srv0; srv1.ptr += srv_inc;
 		srv.Format = DXGI_FORMAT_R32_FLOAT;
 		dev->CreateShaderResourceView(v.depth.Get(), &srv, srv0);
-		srv.Format = DXGI_FORMAT_R8_UNORM;
+		srv.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 		dev->CreateShaderResourceView(v.ao.Get(), &srv, srv1);
 
 		// The scene-pass-facing SRV (t10) in the RESERVED registry slot: the blurred result.
@@ -397,6 +408,43 @@ namespace vortex::graphics::dx12
 		cb.intensity = m_ssao_intensity;
 		cb.bias = 0.015f;
 		cb.proj_scale = 0.5f * XMVectorGetY(proj.r[1]) * (float)v.h;   // proj._22 * h/2
+		// screen-space GI (#257 step 1): the previous frame's opaque colour copy at this view's size is the radiance source
+		DX12Particles::DepthCopy* prev = (slot == 0 && m_gi_enabled) ? m_gi_prev_copy : nullptr;
+		const bool gi_prev = prev && prev->texture && prev->w == m_gi_prev_w && prev->h == m_gi_prev_h && m_gi_prev_w == view_w && m_gi_prev_h == view_h;
+		XMStoreFloat4x4(&cb.proj, proj);
+		{
+			XMMATRIX vp = XMLoadFloat4x4(&m_frame_constants.view_projection);
+			XMMATRIX inv_vp = XMMatrixInverse(nullptr, vp);
+			XMStoreFloat4x4(&cb.view_to_prev_clip, proj * inv_vp * XMLoadFloat4x4(&m_prev_view_projection));
+		}
+		cb.gi_strength = m_gi_enabled ? m_gi_strength : 0.0f;
+		cb.scene_exposure = m_frame_constants.scene_exposure > 0.0f ? m_frame_constants.scene_exposure : 0.5f;
+		cb.prev_valid = gi_prev ? 1.0f : 0.0f; cb.gi_radius = m_gi_radius;
+		{
+			// t1 of the AO pass: the copy's SRV written into the pass-local heap (a shader-visible heap cannot be copied from)
+			auto* dev2 = DX12Core::instance().device();
+			const u32 inc2 = dev2->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+			auto srv2 = v.srv_heap->GetCPUDescriptorHandleForHeapStart(); srv2.ptr += 2 * inc2;
+			D3D12_SHADER_RESOURCE_VIEW_DESC sd{};
+			sd.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; sd.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; sd.Texture2D.MipLevels = 1;
+			if (gi_prev)
+			{
+				sd.Format = prev->format;
+				dev2->CreateShaderResourceView(prev->texture.Get(), &sd, srv2);
+				if (prev->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+				{
+					D3D12_RESOURCE_BARRIER b{};
+					b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; b.Transition.pResource = prev->texture.Get();
+					b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES; b.Transition.StateBefore = prev->state; b.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+					m_command_list->ResourceBarrier(1, &b); prev->state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+				}
+			}
+			else
+			{
+				sd.Format = DXGI_FORMAT_R32_FLOAT;
+				dev2->CreateShaderResourceView(v.depth.Get(), &sd, srv2);   // a valid descriptor; the shader does not read it
+			}
+		}
 
 		m_command_list->SetGraphicsRootSignature(m_ssao_root_sig.Get());
 		m_command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -410,6 +458,7 @@ namespace vortex::graphics::dx12
 		const u32 srv_inc = DX12Core::instance().device()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 		auto srv_gpu0 = v.srv_heap->GetGPUDescriptorHandleForHeapStart();
 		auto srv_gpu1 = srv_gpu0; srv_gpu1.ptr += srv_inc;
+		auto srv_gpu2 = srv_gpu0; srv_gpu2.ptr += 2 * srv_inc;
 		const u32 rtv_inc = DX12Core::instance().device()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 		auto rtv0 = v.rtv_heap->GetCPUDescriptorHandleForHeapStart();
 		auto rtv1 = rtv0; rtv1.ptr += rtv_inc;
@@ -419,6 +468,7 @@ namespace vortex::graphics::dx12
 		m_command_list->OMSetRenderTargets(1, &rtv0, FALSE, nullptr);
 		m_command_list->SetPipelineState(m_ssao_pso.Get());
 		m_command_list->SetGraphicsRootDescriptorTable(0, srv_gpu0);
+		m_command_list->SetGraphicsRootDescriptorTable(2, srv_gpu2);
 		m_command_list->SetGraphicsRoot32BitConstants(1, sizeof(SsaoCB) / 4, &cb, 0);
 		m_command_list->DrawInstanced(3, 1, 0, 0);
 
@@ -428,6 +478,7 @@ namespace vortex::graphics::dx12
 		m_command_list->OMSetRenderTargets(1, &rtv1, FALSE, nullptr);
 		m_command_list->SetPipelineState(m_ssao_blur_pso.Get());
 		m_command_list->SetGraphicsRootDescriptorTable(0, srv_gpu1);
+		m_command_list->SetGraphicsRootDescriptorTable(2, srv_gpu2);
 		m_command_list->SetGraphicsRoot32BitConstants(1, sizeof(SsaoCB) / 4, &cb, 0);
 		m_command_list->DrawInstanced(3, 1, 0, 0);
 

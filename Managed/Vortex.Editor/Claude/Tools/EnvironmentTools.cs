@@ -111,6 +111,9 @@ namespace VortexEditor.Claude.Tools
             [Description("Height falloff per metre above it (0 = no height fog)")] float fog_height_falloff = -1f,
             [Description("Aerial perspective: the sun's glow in the fog when looking towards it (0 = off, 0.3–0.6 a desert noon, 1–2 a low sun)")] float? fog_sun_glow = null,
             [Description("Anti-aliasing (FXAA) on / off")] bool? anti_alias = null,
+            [Description("Screen-space global illumination on / off (one bounce of the lit world; needs SSAO on)")] bool? gi = null,
+            [Description("GI strength (1 = a physical diffuse bounce)")] float gi_strength = -1f,
+            [Description("GI trace radius in metres")] float gi_radius = -1f,
             [Description("Ground bounce strength: the sun's light bounced off the ground into the shadows (0 = off, a desert 0.4–0.7)")] float? bounce_strength = null,
             [Description("Ground bounce colour [r, g, b] — the ground's albedo (sand 0.55, 0.40, 0.26)")] float[] bounce_color = null,
             [Description("Tonemapper: 'aces' (classic filmic, bright saturated colours drift towards white) or 'neutral' (Khronos PBR Neutral, hue-preserving — a sunlit desert stays orange)")] string tonemapper = null,
@@ -145,6 +148,9 @@ namespace VortexEditor.Claude.Tools
             if (scene_exposure.HasValue) st.SceneExposure = scene_exposure.Value;
             if (!string.IsNullOrEmpty(tonemapper)) st.Tonemapper = tonemapper.Trim().ToLowerInvariant().StartsWith("neutral") ? 1 : 0;
             if (anti_alias.HasValue) st.AntiAliasEnabled = anti_alias.Value;
+            if (gi.HasValue) st.GiEnabled = gi.Value;
+            if (gi_strength >= 0f) st.GiStrength = gi_strength;
+            if (gi_radius >= 0f) st.GiRadius = gi_radius;
             if (bounce_strength.HasValue) st.BounceStrength = bounce_strength.Value;
             if (bounce_color != null && bounce_color.Length >= 3) { st.BounceR = bounce_color[0]; st.BounceG = bounce_color[1]; st.BounceB = bounce_color[2]; }
             if (ao.HasValue) st.AoEnabled = ao.Value;
@@ -188,7 +194,7 @@ namespace VortexEditor.Claude.Tools
 
         public static readonly WeatherPreset[] WeatherPresets =
         {
-            new WeatherPreset { Name = "clear",     FogDensity = 0.0007f, FogHeightY = -4f, FogFalloff = 0.012f, FogColor = new[] { 0.52f, 0.50f, 0.50f }, SunIntensity = 5.0f, SunColor = new[] { 1f, 0.90f, 0.70f },  SkyExposure = 1.0f, Ambient = 1.25f, Wind = 0.5f, SceneExposure = 2.6f, FogSunGlow = 0.6f, Sky = "Assets/Skies/syferfontein_18d_clear_puresky_2k.hdr", SunPitch = 18.19f, SunYaw = -144.05f },
+            new WeatherPreset { Name = "clear",     FogDensity = 0.0010f, FogHeightY = -4f, FogFalloff = 0.012f, FogColor = new[] { 0.60f, 0.64f, 0.72f }, SunIntensity = 5.5f, SunColor = new[] { 1f, 0.95f, 0.85f },  SkyExposure = 1.0f, Ambient = 0.9f, Wind = 0.5f, SceneExposure = 2.2f, FogSunGlow = 0.5f, Sky = "Assets/Skies/syferfontein_18d_clear_puresky_2k.hdr", SunPitch = 18.19f, SunYaw = -144.05f },
             new WeatherPreset { Name = "noon",      FogDensity = 0.0011f, FogHeightY = -4f, FogFalloff = 0.012f, FogColor = new[] { 0.40f, 0.43f, 0.50f }, SunIntensity = 5.5f, SunColor = new[] { 1f, 0.93f, 0.82f },  SkyExposure = 1.0f, Ambient = 1.0f, Wind = 0.5f, SceneExposure = 1.7f, FogSunGlow = 0.45f, Sky = "Assets/Skies/goegap_2k.hdr", SunPitch = 46.32f, SunYaw = -141.24f },
             new WeatherPreset { Name = "haze",      FogDensity = 0.0032f, FogHeightY = 2f,  FogFalloff = 0.02f,  FogColor = new[] { 0.46f, 0.44f, 0.42f }, SunIntensity = 4.6f, SunColor = new[] { 1f, 0.88f, 0.72f },  SkyExposure = 0.9f, Ambient = 0.95f,  Wind = 1.1f, SceneExposure = 1.5f, FogSunGlow = 0.8f, Haze = true, Sky = "Assets/Skies/goegap_2k.hdr", SunPitch = 46.32f, SunYaw = -141.24f },
             new WeatherPreset { Name = "sandstorm", FogDensity = 0.012f,  FogHeightY = 12f, FogFalloff = 0.012f, FogColor = new[] { 0.42f, 0.32f, 0.20f }, SunIntensity = 2.4f, SunColor = new[] { 1f, 0.74f, 0.48f },  SkyExposure = 0.6f,  Ambient = 1.0f,  Wind = 2.6f, SceneExposure = 1.2f, FogSunGlow = 0.6f, Haze = true, Storm = true, SunPitch = 46.32f, SunYaw = -141.24f, SkyTop = new[] { 0.62f, 0.50f, 0.36f }, SkyHorizon = new[] { 0.80f, 0.64f, 0.44f }, SkyBottom = new[] { 0.66f, 0.50f, 0.34f } },
@@ -284,6 +290,7 @@ namespace VortexEditor.Claude.Tools
         {
             exposure = new { scene_stops = st.SceneExposure, tonemapper = st.Tonemapper == 1 ? "neutral" : "aces", anti_alias = st.AntiAliasEnabled },
             bounce = new { strength = st.BounceStrength, color = new[] { st.BounceR, st.BounceG, st.BounceB } },
+            gi = new { on = st.GiEnabled, strength = st.GiStrength, radius = st.GiRadius, mode = "screen-space" },
             fog = new { on = st.FogEnabled, density = st.FogDensity, color = new[] { st.FogR, st.FogG, st.FogB }, height_y = st.FogHeightY, height_falloff = st.FogHeightFalloff, sun_glow = st.FogSunGlow },
             ao = new { on = st.AoEnabled, radius = st.AoRadius, intensity = st.AoIntensity },
             bloom = new { on = st.BloomEnabled, threshold = st.BloomThreshold, intensity = st.BloomIntensity },

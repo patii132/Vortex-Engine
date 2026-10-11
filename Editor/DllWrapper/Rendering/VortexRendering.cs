@@ -908,6 +908,9 @@ namespace Editor.DllWrapper
         [DllImport(_dllName, CallingConvention = _cc)]
         private static extern void SetSSAO([MarshalAs(UnmanagedType.I1)] bool enabled, float radius, float intensity);
 
+        [DllImport(_dllName, CallingConvention = _cc, EntryPoint = "SetGlobalIllumination")]
+        private static extern void SetGlobalIlluminationNative([MarshalAs(UnmanagedType.I1)] bool enabled, float strength, float radius);
+
         /// <summary>
         /// Clear all dynamic lights. Call at the beginning of each frame before submitting new lights.
         /// </summary>
@@ -1090,6 +1093,14 @@ namespace Editor.DllWrapper
         public static void SetAmbientOcclusion(bool enabled, float radius, float intensity)
         {
             try { SetSSAO(enabled, radius, intensity); } catch { }
+        }
+
+        /// <summary>Screen-space global illumination (the first step of the dynamic GI, #257): one bounce of the lit world traced
+        /// in the SSAO pass against the depth, with the radiance of the previous frame — sand warms the trunks, a lit wall lights
+        /// the floor next to it. Needs SSAO on. strength 1 = a physical diffuse bounce, radius = the trace length in metres.</summary>
+        public static void SetGlobalIllumination(bool enabled, float strength, float radius)
+        {
+            try { SetGlobalIlluminationNative(enabled, strength, radius); } catch { }
         }
 
         #endregion
