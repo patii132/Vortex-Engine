@@ -41,15 +41,25 @@ original-quality downloads (#289).
 "v2.8.0 – Global Asset Database" is v2.9.0 and the Asset Store moved to v2.10.0.
 
 ## Now
-1. **The look first (user decision, 2026-10-11): the rendering is finished before multiplayer starts.** v3.4.3 brings the
-   exposure pipeline (scene exposure in stops before the tonemapper, ACES / Khronos PBR Neutral per scene, the HDR sky
-   through the same curve, the sun's glow in the fog) and the oasis to the horizon (4 km far dunes, mountains, a
-   seamless 1024-texel terrain atlas). Next in **v3.5.0 — AAA Rendering**: dynamic GI (#257 — the "Lumen" item:
-   probe volumes with ray-traced updates where the GPU can, raster captures elsewhere), TAA (#141) + upscaling (#255),
-   large-world shadows (#201), physical sky (#256), auto-exposure + LUTs (#258).
-2. **v3.4.5 — Streaming** stays the performance half: impostors (#199), HLOD (#198), texture streaming (#195),
-   BCn (#179), world partition (#197).
-3. **Stability:** every crash is a bug. The editor logs fatal errors with the last console lines
+1. **The look first (user decision, 2026-10-11): the rendering is finished before multiplayer starts.** On the branch
+   `feat/water-step2` (PR #445) so far: the exposure pipeline (scene exposure in stops, ACES / PBR Neutral, the HDR sky
+   through the same curve, aerial perspective on the world and the sky), soft sun shadows, FXAA, the ground bounce,
+   block-compressed textures with a disk cache (4K maps at an eighth of the memory), the terrain to the horizon, and
+   **dynamic GI step 1: screen-space GI** (one bounce traced in the SSAO pass, DX12 / Metal / Vulkan).
+2. **Dynamic GI, the full build (#257) — the techniques behind Lumen, implemented from the published papers, never from
+   Epic's source:**
+   - step 2 *world-space radiance cache*: a probe volume around the camera (DDGI-style irradiance + visibility probes,
+     relocated out of walls) fed by rays; the screen traces of step 1 fall back to the probes where the screen has no answer;
+   - step 3 *software ray tracing*: a global signed distance field of the static world (meshes voxelised at import, the
+     terrain analytic) and a surface cache (albedo / normal / lighting cards per mesh) the probe rays march on every GPU
+     without ray-tracing hardware — the Mac's Metal path;
+   - step 4 *hardware ray tracing*: DXR on Windows (the RTX card) for the probe rays, reflections (#155) and sun shadows,
+     Metal ray tracing on Apple silicon where available; one code path per backend behind the same probe cache;
+   - step 5 *the rest of the AAA look*: TAA + upscaling (#141, #255), large-world shadows (#201), physical sky (#256),
+     auto-exposure + LUTs (#258).
+3. **v3.4.5 — Streaming** stays the performance half: impostors (#199), HLOD (#198), texture streaming (#195),
+   world partition (#197).
+4. **Stability:** every crash is a bug. The editor logs fatal errors with the last console lines
    (`<appdata>/VortexEngine/logs/editor-errors.log`), a native crash on Windows writes `crash-<time>.dmp` + `.txt`
    next to it, a lost DX12 device is named in the log, and a broken MCP tool is skipped instead of ending the editor.
    Send those files with every crash report.
