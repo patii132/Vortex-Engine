@@ -240,6 +240,14 @@ vec3 tonemap_scene(vec3 color, float exposure, uint mode)
 }
 
 // Aerial perspective: the flat fog colour plus the sun's forward-scatter glow when looking towards it (fog_sun_glow 0 = off).
+// a normal-atlas texel: tangent-space xyz; a two-channel (BC5) atlas carries x / y and z is rebuilt per sample
+vec3 decode_n(vec3 s)
+{
+	s = s * 2.0 - 1.0;
+	if (obj.has_normal_texture == 2u) s.z = sqrt(saturate(1.0 - dot(s.xy, s.xy)));
+	return s;
+}
+
 vec3 fog_inscatter(vec3 world_pos)
 {
 	vec3 c = frame.fog_color;
@@ -442,7 +450,7 @@ void main()
 			albedo += wi * mix(srgb_to_linear(textureGrad(u_albedo, a, dx, dy).rgb), srgb_to_linear(textureGrad(u_albedo, aM, dxM, dyM).rgb), 0.5);
 		else albedo += wi * vec3(0.5);
 		if (obj.has_normal_texture != 0u)
-			nm += wi * mix(textureGrad(u_normal, a, dx, dy).rgb * 2.0 - 1.0, textureGrad(u_normal, aM, dxM, dyM).rgb * 2.0 - 1.0, 0.5);
+			nm += wi * mix(decode_n(textureGrad(u_normal, a, dx, dy).rgb), decode_n(textureGrad(u_normal, aM, dxM, dyM).rgb), 0.5);
 		if (obj.has_normal_texture != 0u && detail_w > 0.001)
 		{
 			vec2 ad = atlas_uv(uv * 7.3 + 0.37, i);

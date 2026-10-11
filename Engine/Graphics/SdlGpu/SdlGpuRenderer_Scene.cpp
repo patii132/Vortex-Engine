@@ -873,7 +873,7 @@ namespace vortex::graphics::sdlgpu
 					if (t && t->is_valid()) { bindings[slot].texture = t->texture(); flag = packed ? packed : 1; }
 				};
 				bind(mat->albedo_texture(), 0, obj.has_albedo_texture, 1);
-				bind(mat->normal_texture(), 1, obj.has_normal_texture, 1);
+				bind(mat->normal_texture(), 1, obj.has_normal_texture, props.has_normal_texture);   // 2 = a two-channel (BC5) map, the shader rebuilds z
 				bind(mat->metallic_texture(), 2, obj.has_metallic_texture, props.has_metallic_texture);
 				bind(mat->roughness_texture(), 3, obj.has_roughness_texture, props.has_roughness_texture);
 				bind(mat->ao_texture(), 4, obj.has_ao_texture, props.has_ao_texture);

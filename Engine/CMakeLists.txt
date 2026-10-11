@@ -23,6 +23,7 @@ set(VORTEX_ENGINE_CORE_SOURCES
 	Graphics/Importers/ModelImporter.cpp
 	Graphics/Importers/ModelImporter_Process.cpp
 	Graphics/Importers/TextureImporter.cpp
+	Graphics/Importers/TextureCompress.cpp
 	Graphics/Particles/ParticleJson.cpp
 	Graphics/Particles/ParticleSystem.cpp
 	Input/InputSystem.cpp
@@ -340,7 +341,7 @@ else()
 	# Single-header third-party code (miniaudio + stb_vorbis live in AudioEngine.cpp, stb_image in TextureImporter.cpp)
 	# Optimised even in Debug: an unoptimised stb_image needs seconds per 4K PNG, which made a debug editor take
 	# ~20 s to open a scene with PBR materials.
-	set_source_files_properties(Runtime/Systems/AudioEngine.cpp Graphics/Importers/TextureImporter.cpp
+	set_source_files_properties(Runtime/Systems/AudioEngine.cpp Graphics/Importers/TextureImporter.cpp Graphics/Importers/TextureCompress.cpp
 		PROPERTIES COMPILE_OPTIONS "-w;-O2")
 	# The particle simulation is a hot loop over up to 10^5-10^6 particles per frame: keep it optimised in Debug
 	# builds too (an -O0 build is ~8x slower there), like a physics engine that is always built optimised.

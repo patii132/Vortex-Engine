@@ -423,6 +423,14 @@ float3 SampleEnv(float3 R, float roughness)
     return DecodeEnv(EnvMap.SampleLevel(LinearSampler, EnvUV(R), lod).rgb);
 }
 
+// a normal-atlas texel: tangent-space xyz; a two-channel (BC5) atlas carries x / y and z is rebuilt per sample
+float3 DecodeN(float3 s)
+{
+    s = s * 2.0 - 1.0;
+    if (HasNormalTexture == 2) s.z = sqrt(saturate(1.0 - dot(s.xy, s.xy)));
+    return s;
+}
+
 float4 PSMain(PS_IN input) : SV_TARGET
 {
     float3 Ng = normalize(input.norm);
@@ -464,7 +472,7 @@ float4 PSMain(PS_IN input) : SV_TARGET
             albedo += wi * lerp(SRGBToLinear(AlbedoTexture.SampleGrad(LinearSampler, a, dx, dy).rgb), SRGBToLinear(AlbedoTexture.SampleGrad(LinearSampler, aM, dxM, dyM).rgb), 0.5);
         else albedo += wi * float3(0.5, 0.5, 0.5);
         if (HasNormalTexture != 0)
-            nm += wi * lerp(NormalTexture.SampleGrad(LinearSampler, a, dx, dy).rgb * 2.0 - 1.0, NormalTexture.SampleGrad(LinearSampler, aM, dxM, dyM).rgb * 2.0 - 1.0, 0.5);
+            nm += wi * lerp(DecodeN(NormalTexture.SampleGrad(LinearSampler, a, dx, dy).rgb), DecodeN(NormalTexture.SampleGrad(LinearSampler, aM, dxM, dyM).rgb), 0.5);
         if (HasNormalTexture != 0 && detailW > 0.001)
         {
             float2 ad = AtlasUV(uv * 7.3 + 0.37, i);
@@ -495,6 +503,7 @@ float4 PSMain(PS_IN input) : SV_TARGET
 
     // normal mapping in the world-aligned frame of the tiled UVs: T follows +X (+u), B follows +Z (+v)
     float3 N = Ng;
+    if (HasNormalTexture == 2) nm.z = sqrt(saturate(1.0 - dot(nm.xy, nm.xy)));   // a two-channel (BC5) atlas: z from x / y
     if (HasNormalTexture != 0 && dot(nm, nm) > 1e-6)
     {
         if (UseDirectXNormals == 0) nm.y = -nm.y;

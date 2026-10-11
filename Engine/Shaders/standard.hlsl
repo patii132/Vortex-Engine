@@ -535,6 +535,7 @@ float4 PSMain(PS_IN input) : SV_TARGET
     if (HasNormalTexture != 0) {
         float3 normalMap = NormalTexture.Sample(LinearSampler, uv).rgb;
         normalMap = normalMap * 2.0 - 1.0;
+        if (HasNormalTexture == 2) normalMap.z = sqrt(saturate(1.0 - dot(normalMap.xy, normalMap.xy)));   // a two-channel (BC5) map
         if (UseDirectXNormals == 0) normalMap.y = -normalMap.y;
         normalMap.xy *= NormalStrength;
         float3x3 TBN = float3x3(T, B, N);

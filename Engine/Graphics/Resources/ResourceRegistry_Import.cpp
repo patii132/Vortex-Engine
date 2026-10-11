@@ -74,13 +74,24 @@ namespace vortex::graphics
 			if (it != m_texture_path_cache.end() && get_texture(it->second)) return it->second;
 		}
 
+		// the compressed-texture cache (#179): a known file skips the decode and the encode
+		if (TextureCompress::enabled() && !TextureCompress::cache_dir().empty())
+		{
+			const std::string ck = TextureCompress::cache_key(filepath, CompressKind::Auto);
+			CompressedTexture ct;
+			if (!ck.empty() && TextureCompress::load_cached(ck, ct))
+			{
+				const id::id_type cid = create_texture_compressed(ct, filepath + " (cache)");
+				if (cid != id::invalid_id) { if (!key.empty()) { m_texture_path_cache[key] = cid; retire_stale_textures(filepath, cid); } return cid; }
+			}
+		}
 		ImageData image_data = TextureImporter::import_from_file(filepath);
 		if (!image_data.is_valid())
 		{
 			VORTEX_VLOG(("Failed to load texture: " + filepath + "\n").c_str());
 			return id::invalid_id;
 		}
-		const id::id_type id = create_texture_from_image(image_data, filepath);
+		const id::id_type id = create_texture_from_image(image_data, filepath, &filepath);
 		if (!key.empty() && id != id::invalid_id) { m_texture_path_cache[key] = id; retire_stale_textures(filepath, id); }
 		return id;
 	}
@@ -97,6 +108,16 @@ namespace vortex::graphics
 			if (key.empty()) continue;
 			auto hit = m_texture_path_cache.find(key);
 			if (hit != m_texture_path_cache.end() && get_texture(hit->second)) continue;
+			if (TextureCompress::enabled() && !TextureCompress::cache_dir().empty())
+			{
+				CompressedTexture ct;
+				const std::string ck = TextureCompress::cache_key(p, CompressKind::Auto);
+				if (!ck.empty() && TextureCompress::load_cached(ck, ct))
+				{
+					const id::id_type cid = create_texture_compressed(ct, p + " (cache)");
+					if (cid != id::invalid_id) { m_texture_path_cache[key] = cid; retire_stale_textures(p, cid); continue; }
+				}
+			}
 			bool dup = false;
 			for (const auto& t : todo) if (t.second == key) { dup = true; break; }
 			if (!dup) todo.emplace_back(p, std::move(key));
@@ -114,7 +135,7 @@ namespace vortex::graphics
 			{
 				ImageData image = jobs[i - start].get();
 				if (!image.is_valid()) continue;
-				const id::id_type id = create_texture_from_image(image, todo[i].first);
+				const id::id_type id = create_texture_from_image(image, todo[i].first, &todo[i].first);
 				if (id != id::invalid_id) { m_texture_path_cache[todo[i].second] = id; retire_stale_textures(todo[i].first, id); }
 			}
 		}

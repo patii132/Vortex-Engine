@@ -35,7 +35,17 @@ namespace Editor.DllWrapper
         private static extern void ShutdownRenderViewport();
 
         public static bool InitRenderViewport(System.IntPtr hwnd, uint width, uint height) 
-            => InitializeRenderViewport(hwnd, width, height);
+        {
+            // texture compression (#179): the cache folder before the first picture loads; VORTEX_TEXTURE_COMPRESSION=0 turns it off
+            try
+            {
+                string off = System.Environment.GetEnvironmentVariable("VORTEX_TEXTURE_COMPRESSION");
+                ConfigureTextureCompression(off != "0", 256);
+                SetTextureCacheDirectory(System.IO.Path.Combine(Editor.Core.Services.EditorPaths.VortexAppData, "texcache"));
+            }
+            catch { }
+            return InitializeRenderViewport(hwnd, width, height);
+        }
         public static void ResizeRender(uint width, uint height) => ResizeRenderViewport(width, height);
         public static void RenderOnce() => RenderFrame();
         /// <summary>

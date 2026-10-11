@@ -120,7 +120,7 @@ namespace vortex::graphics
 	void Material::set_normal_texture(Texture* texture)
 	{
 		m_normal_texture = texture;
-		m_properties.has_normal_texture = (texture && texture->is_valid()) ? 1 : 0;
+		m_properties.has_normal_texture = (texture && texture->is_valid()) ? (texture->format() == TextureFormat::BC5_UNORM ? 2u : 1u) : 0u;   // 2 = two-channel map, the shader rebuilds z
 		update_gpu_data();
 	}
 

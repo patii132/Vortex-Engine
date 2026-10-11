@@ -18,6 +18,10 @@ namespace vortex::graphics
 		RG8_UNORM,
 		RGBA16_FLOAT,
 		RGBA32_FLOAT,
+		BC1_UNORM,         // block compressed (#179): colour, 8 bytes per 4x4
+		BC3_UNORM,         // colour + alpha, 16 bytes per 4x4
+		BC4_UNORM,         // one channel, 8 bytes per 4x4
+		BC5_UNORM,         // two channels (normal x / y), 16 bytes per 4x4
 		D24_UNORM_S8_UINT,
 		D32_FLOAT
 	};
@@ -28,6 +32,7 @@ namespace vortex::graphics
 		u32 height{ 0 };
 		TextureFormat format{ TextureFormat::RGBA8_UNORM };
 		bool generate_mips{ false };
+		u32 mip_count{ 0 };        // > 1: data holds this many levels, tightly packed, level 0 first (block formats come this way)
 		bool is_render_target{ false };
 		bool is_depth_stencil{ false };
 	};
@@ -55,6 +60,8 @@ namespace vortex::graphics
 		void set_srv_handles(D3D12_CPU_DESCRIPTOR_HANDLE cpu, D3D12_GPU_DESCRIPTOR_HANDLE gpu);
 
 		static DXGI_FORMAT to_dxgi_format(TextureFormat format);
+		static bool is_block_format(TextureFormat f) { return f == TextureFormat::BC1_UNORM || f == TextureFormat::BC3_UNORM || f == TextureFormat::BC4_UNORM || f == TextureFormat::BC5_UNORM; }
+		static u64 level_bytes(TextureFormat f, u32 w, u32 h);
 
 	private:
 		ComPtr<ID3D12Resource> m_resource;

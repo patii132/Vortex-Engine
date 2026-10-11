@@ -1,5 +1,6 @@
 #include "../ApiCommon.h"
 #include "../../Engine/Graphics/Importers/TextureImporter.h"
+#include "../../Engine/Graphics/Importers/TextureCompress.h"
 #include <cstring>
 #include <string>
 #include <vector>
@@ -41,6 +42,40 @@ EDITOR_INTERFACE id::id_type CreateMeshFromData(const float* vertices, int32_t v
 
 // width x height RGBA8 pixels, row-major from the top. srgb != 0 stores them as sRGB (the engine's shaders convert
 // albedo themselves, so splat maps and atlases pass 0); mips != 0 builds the mip chain. id::invalid_id on failure.
+EDITOR_INTERFACE id::id_type CreateTexturePixels(int32_t width, int32_t height, int32_t srgb, int32_t mips, const unsigned char* rgba);
+
+// The same with a compression kind (#179): 0 = RGBA8 as it is, 1 = colour (BC1), 2 = colour + alpha (BC3), 3 = normal map
+// (BC5, x / y — the shaders rebuild z), 4 = one channel (BC4). Falls back to RGBA8 when compression is off or the size is
+// not a multiple of 4.
+EDITOR_INTERFACE id::id_type CreateTexturePixelsEx(int32_t width, int32_t height, int32_t srgb, int32_t mips, int32_t kind, const unsigned char* rgba)
+{
+	if (width <= 0 || height <= 0 || !rgba) return id::invalid_id;
+	if (kind > 0 && kind <= 4 && srgb == 0 && graphics::TextureCompress::eligible((u32)width, (u32)height))
+	{
+		graphics::CompressedTexture ct;
+		if (graphics::TextureCompress::compress_rgba8(rgba, (u32)width, (u32)height, (graphics::CompressKind)kind, mips != 0, ct))
+		{
+			const id::id_type cid = graphics::ResourceRegistry::instance().create_texture_compressed(ct, "pixels");
+			if (cid != id::invalid_id) return cid;
+		}
+	}
+	return CreateTexturePixels(width, height, srgb, mips, rgba);
+}
+
+// Texture compression policy (#179): enabled = 0 keeps every picture RGBA8; min_size = the smallest side that gets
+// compressed (icons and small masks stay exact).
+EDITOR_INTERFACE void SetTextureCompression(int32_t enabled, int32_t min_size)
+{
+	graphics::TextureCompress::set_enabled(enabled != 0);
+	if (min_size > 0) graphics::TextureCompress::set_min_size((u32)min_size);
+}
+
+// Where compressed textures are cached between runs (a folder; empty = no cache).
+EDITOR_INTERFACE void SetTextureCacheDir(const char* dir)
+{
+	graphics::TextureCompress::set_cache_dir(dir ? std::string(dir) : std::string());
+}
+
 EDITOR_INTERFACE id::id_type CreateTexturePixels(int32_t width, int32_t height, int32_t srgb, int32_t mips, const unsigned char* rgba)
 {
 	if (width <= 0 || height <= 0 || !rgba) return id::invalid_id;

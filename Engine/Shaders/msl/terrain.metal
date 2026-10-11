@@ -389,6 +389,14 @@ static inline float3 sample_env(texture2d<float> env_tex, sampler env_smp, float
     return decode_env(env_tex.sample(env_smp, env_uv(R), level(lod)).rgb);
 }
 
+// a normal-atlas texel: tangent-space xyz; a two-channel (BC5) atlas carries x / y and z is rebuilt per sample
+static inline float3 decode_n(float3 s, uint has_normal)
+{
+    s = s * 2.0 - 1.0;
+    if (has_normal == 2) s.z = sqrt(saturate(1.0 - dot(s.xy, s.xy)));
+    return s;
+}
+
 fragment float4 PSMain(VSOut in [[stage_in]],
                        constant PerFrame& frame [[buffer(0)]],
                        constant PerObject& obj [[buffer(1)]],
@@ -440,7 +448,7 @@ fragment float4 PSMain(VSOut in [[stage_in]],
             albedo += wi * mix(srgb_to_linear(albedo_tex.sample(albedo_smp, a, gradient2d(dx, dy)).rgb), srgb_to_linear(albedo_tex.sample(albedo_smp, aM, gradient2d(dxM, dyM)).rgb), 0.5);
         else albedo += wi * float3(0.5);
         if (obj.has_normal_texture != 0)
-            nm += wi * mix(normal_tex.sample(normal_smp, a, gradient2d(dx, dy)).rgb * 2.0 - 1.0, normal_tex.sample(normal_smp, aM, gradient2d(dxM, dyM)).rgb * 2.0 - 1.0, 0.5);
+            nm += wi * mix(decode_n(normal_tex.sample(normal_smp, a, gradient2d(dx, dy)).rgb, obj.has_normal_texture), decode_n(normal_tex.sample(normal_smp, aM, gradient2d(dxM, dyM)).rgb, obj.has_normal_texture), 0.5);
         if (obj.has_normal_texture != 0 && detail_w > 0.001)
         {
             float2 ad = atlas_uv(uv * 7.3 + 0.37, i);
@@ -468,6 +476,7 @@ fragment float4 PSMain(VSOut in [[stage_in]],
     float ao = obj.ao;
 
     float3 N = Ng;
+    if (obj.has_normal_texture == 2) nm.z = sqrt(saturate(1.0 - dot(nm.xy, nm.xy)));   // a two-channel (BC5) atlas
     if (obj.has_normal_texture != 0 && dot(nm, nm) > 1e-6)
     {
         if (obj.use_directx_normals == 0) nm.y = -nm.y;

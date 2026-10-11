@@ -40,7 +40,9 @@ namespace Editor.Core.Services.Terrain
                 if (!string.IsNullOrEmpty(s) && int.TryParse(s, out v) && (v == 256 || v == 512 || v == 1024 || v == 2048)) return v;
             }
             catch { }
-            return 1024;
+            // 2048 per layer (a 4096² atlas) once the atlas is block compressed; 1024 when compression is off (VORTEX_TEXTURE_COMPRESSION=0)
+            try { if (Environment.GetEnvironmentVariable("VORTEX_TEXTURE_COMPRESSION") == "0") return 1024; } catch { }
+            return 2048;
         }
         private const int GraveFrames = 3;
 
@@ -314,9 +316,11 @@ namespace Editor.Core.Services.Terrain
                 if (mat != null) { roughFallback += mat.Roughness; roughCount++; }
             }
 
-            long a = VortexAPI.CreateTextureFromPixels(AtlasSize, AtlasSize, albedo, false, true);
-            long nrm = VortexAPI.CreateTextureFromPixels(AtlasSize, AtlasSize, normal, false, true);
-            long r = VortexAPI.CreateTextureFromPixels(AtlasSize, AtlasSize, rough, false, true);
+            // block compressed (#179): albedo BC1, normal BC5 (the terrain shader rebuilds z), roughness BC4 — a 4096² atlas set is
+            // ~38 MB instead of ~256 MB
+            long a = VortexAPI.CreateTextureFromPixels(AtlasSize, AtlasSize, albedo, false, true, VortexAPI.TextureKindColor);
+            long nrm = VortexAPI.CreateTextureFromPixels(AtlasSize, AtlasSize, normal, false, true, VortexAPI.TextureKindNormal);
+            long r = VortexAPI.CreateTextureFromPixels(AtlasSize, AtlasSize, rough, false, true, VortexAPI.TextureKindGray);
             if (rt.AlbedoAtlas != ID.INVALID_ID) _graveyard.Add((rt.AlbedoAtlas, true, _frame));
             if (rt.NormalAtlas != ID.INVALID_ID) _graveyard.Add((rt.NormalAtlas, true, _frame));
             if (rt.RoughnessAtlas != ID.INVALID_ID) _graveyard.Add((rt.RoughnessAtlas, true, _frame));

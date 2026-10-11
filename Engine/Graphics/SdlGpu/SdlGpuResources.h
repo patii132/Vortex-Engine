@@ -1,4 +1,5 @@
 #pragma once
+#include "../Importers/TextureCompress.h"
 
 // ============================================================================
 // GPU resources for the SDL GPU backend (Metal on macOS, Vulkan on Linux).
@@ -31,6 +32,10 @@ namespace vortex::graphics
 		RG8_UNORM,
 		RGBA16_FLOAT,
 		RGBA32_FLOAT,
+		BC1_UNORM,         // block compressed (#179): colour, 8 bytes per 4x4
+		BC3_UNORM,         // colour + alpha, 16 bytes per 4x4
+		BC4_UNORM,         // one channel, 8 bytes per 4x4
+		BC5_UNORM,         // two channels (normal x / y), 16 bytes per 4x4
 		D24_UNORM_S8_UINT,
 		D32_FLOAT
 	};
@@ -41,6 +46,7 @@ namespace vortex::graphics
 		u32 height{ 0 };
 		TextureFormat format{ TextureFormat::RGBA8_UNORM };
 		bool generate_mips{ false };
+		u32 mip_count{ 0 };        // > 1: data holds this many levels, tightly packed, level 0 first (block formats come this way)
 		bool is_render_target{ false };
 		bool is_depth_stencil{ false };
 	};
@@ -105,6 +111,10 @@ namespace vortex::graphics
 		bool create(SDL_GPUDevice* device, const TextureDesc& desc, const void* data = nullptr);
 		bool create_from_color(SDL_GPUDevice* device, u32 color);
 		void destroy();
+		static bool is_block_format(TextureFormat f) { return f == TextureFormat::BC1_UNORM || f == TextureFormat::BC3_UNORM || f == TextureFormat::BC4_UNORM || f == TextureFormat::BC5_UNORM; }
+		static u64 level_bytes(TextureFormat f, u32 w, u32 h);
+		// whether the device samples BCn (every desktop GPU; a mobile part would not)
+		static bool supports_block_formats(SDL_GPUDevice* device);
 
 		SDL_GPUTexture* texture() const { return m_texture; }
 		u32 width() const { return m_width; }
@@ -155,7 +165,8 @@ namespace vortex::graphics
 		u32 blend_mode() const { return m_blend_mode; }
 
 		void set_albedo_texture(Texture* texture) { m_albedo_texture = texture; m_properties.has_albedo_texture = (texture && texture->is_valid()) ? 1 : 0; }
-		void set_normal_texture(Texture* texture) { m_normal_texture = texture; m_properties.has_normal_texture = (texture && texture->is_valid()) ? 1 : 0; }
+		// 2 = a two-channel (BC5) map: the shader rebuilds z
+		void set_normal_texture(Texture* texture) { m_normal_texture = texture; m_properties.has_normal_texture = (texture && texture->is_valid()) ? (texture->format() == TextureFormat::BC5_UNORM ? 2u : 1u) : 0u; }
 		void set_metallic_texture(Texture* texture) { m_metallic_texture = texture; m_properties.has_metallic_texture = (texture && texture->is_valid()) ? 1 + m_metallic_channel : 0; }
 		void set_roughness_texture(Texture* texture) { m_roughness_texture = texture; m_properties.has_roughness_texture = (texture && texture->is_valid()) ? 1 + m_roughness_channel : 0; }
 		void set_ao_texture(Texture* texture) { m_ao_texture = texture; m_properties.has_ao_texture = (texture && texture->is_valid()) ? 1 + m_ao_channel : 0; }
@@ -258,6 +269,8 @@ namespace vortex::graphics
 		// Import management
 		id::id_type import_model(const std::string& filepath);
 		id::id_type import_texture(const std::string& filepath, const std::string& name = "");
+		// A block-compressed picture with its mip chain (#179) — from the compressor or its disk cache.
+		id::id_type create_texture_compressed(const CompressedTexture& ct, const std::string& label);
 		// Decode the not-yet-cached files among `paths` on worker threads (GPU upload stays on this thread) and
 		// add them to the path cache, so the import_texture calls that follow are hits.
 		void prefetch_textures(const std::vector<std::string>& paths);
@@ -309,7 +322,7 @@ namespace vortex::graphics
 
 		id::id_type create_mesh_from_submesh(const SubMeshData& submesh, const std::string& name);
 		void register_lod_chain(id::id_type base_mesh_id, const SubMeshData& submesh, const std::string& name);
-		id::id_type create_texture_from_image(ImageData& image_data, const std::string& label);
+		id::id_type create_texture_from_image(ImageData& image_data, const std::string& label, const std::string* cache_path = nullptr);
 		MultiMaterialImportResult build_model_result(ImportedModelData& model_data);
 
 		SDL_GPUDevice* m_device{ nullptr };

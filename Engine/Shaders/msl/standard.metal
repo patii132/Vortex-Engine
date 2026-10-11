@@ -561,6 +561,7 @@ fragment float4 PSMain(VSOut in [[stage_in]],
     if (obj.has_normal_texture != 0)
     {
         float3 nm = normal_tex.sample(normal_smp, uv).rgb * 2.0 - 1.0;
+        if (obj.has_normal_texture == 2) nm.z = sqrt(saturate(1.0 - dot(nm.xy, nm.xy)));   // a two-channel (BC5) map
         if (obj.use_directx_normals == 0) nm.y = -nm.y;
         nm.xy *= obj.normal_strength;
         N = normalize(nm.x * T + nm.y * B + nm.z * N);
