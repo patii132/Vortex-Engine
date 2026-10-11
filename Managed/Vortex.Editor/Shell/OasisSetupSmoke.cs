@@ -107,13 +107,13 @@ namespace VortexEditor.Shell
             // the late afternoon of the syferfontein pure sky (18.2° up, azimuth 216° — tools/hdri-analyze.py): long palm shadows,
             // the sun's glow in the haze; the goegap noon stays the "noon" weather preset
             sun.Transform.LocalRotation = new Vector3(18.19f, -144.05f, 0f);
-            sun.AddComponentDirect(new Light(sun, LightType.Directional) { Intensity = 8f, ColorR = 1f, ColorG = 0.90f, ColorB = 0.72f, ShadowType = ShadowType.Soft });   // at 18° a flat floor gets only 0.31 of the sun — the ambient has to stay well under that or the shade is as bright as the sun (it was, at 5.5 / 0.9). A late sun, but not orange: the sand must stay golden, not pink
+            sun.AddComponentDirect(new Light(sun, LightType.Directional) { Intensity = 8f, ColorR = 1f, ColorG = 0.84f, ColorB = 0.62f, ShadowType = ShadowType.Soft });   // at 18° a flat floor gets only 0.31 of the sun — the ambient has to stay well under that or the shade is as bright as the sun (it was, at 5.5 / 0.9). A late sun, but not orange: the sand must stay golden, not pink
 
             // ---- the sky: the desert HDRI; the gradient colours are its environment (reflections, the lakes' sky) ----
             var sky = scene.CreateEntity("Sky");
             sky.AddComponentDirect(new Skybox(sky)
             {
-                IsEnabled = true, SkyboxType = SkyboxType.Texture, TexturePath = "Assets/Skies/syferfontein_18d_clear_puresky_2k.hdr", Exposure = 0.5f, AmbientIntensity = 0.45f,
+                IsEnabled = true, SkyboxType = SkyboxType.Texture, TexturePath = "Assets/Skies/syferfontein_18d_clear_puresky_2k.hdr", Exposure = 0.4f, AmbientIntensity = 0.45f,
                 TopColorR = 0.25f, TopColorG = 0.42f, TopColorB = 0.85f,
                 HorizonColorR = 0.95f, HorizonColorG = 0.88f, HorizonColorB = 0.75f,
                 BottomColorR = 0.60f, BottomColorG = 0.50f, BottomColorB = 0.35f
@@ -255,13 +255,13 @@ namespace VortexEditor.Shell
             st.SceneExposure = 1.7f;   // stops before the tonemapper: the low sun needs more aperture than noon; 2.2 pushed the sunlit sand into the tonemapper's shoulder (pale pink), 2.6 clipped the crowns
             st.FogEnabled = true; st.FogDensity = 0.00028f;   // at 0.0010 the air swallowed 63 % of a dune 1 km out — the reference's dunes are saturated to the horizon st.FogHeightY = -4f; st.FogHeightFalloff = 0.012f;
             st.FogR = 0.70f; st.FogG = 0.62f; st.FogB = 0.52f; st.FogSunGlow = 0.2f;   // the reference's distance is peach, not blue-white   // the reference's far dunes fade to a neutral, slightly cool white — a warm haze turned them salmon
-            st.GradeEnabled = true; st.Exposure = 0f; st.Contrast = 1.12f; st.Saturation = 1.06f; st.Temperature = 0.0f; st.Tint = 0.0f;   // the reference is NOT saturated: the sand golden, the palms olive, the shadows warm
+            st.GradeEnabled = true; st.Exposure = 0f; st.Contrast = 1.06f; st.Saturation = 1.05f;   // a light touch: the grade only reaches the viewport once SetPostMainView is on (the oasis capture turns it on) — at 1.22 the sky went navy and the sand neon st.Temperature = 0.0f; st.Tint = 0.0f;   // the reference is NOT saturated: the sand golden, the palms olive, the shadows warm
             st.AoEnabled = true; st.AoRadius = 0.8f; st.AoIntensity = 0.9f;
             st.GiEnabled = true; st.GiStrength = 0.6f; st.GiRadius = 3.0f;   // screen-space GI: the sand's light on the trunks and the undergrowth
             st.BloomEnabled = true; st.BloomThreshold = 0.95f; st.BloomIntensity = 0.18f; st.BloomScatter = 0.6f;   // 0.3 spread the sun into a white sheet
             // sun shafts through the palms: a thin volumetric haze marched 160 m, strongly forward-scattering
-            st.VolumetricEnabled = true; st.VolumetricDensity = 0.0025f; st.VolumetricAnisotropy = 0.75f; st.VolumetricDistance = 120f;
-            st.VolumetricNoise = 0.25f; st.VolumetricNoiseScale = 12f; st.VolumetricNoiseSpeed = 0.2f; st.VolumetricSun = 0.8f;
+            st.VolumetricEnabled = true; st.VolumetricDensity = 0.0018f; st.VolumetricAnisotropy = 0.55f; st.VolumetricDistance = 120f;   // g 0.75 + sun 1.6 whited out a third of the frame around the sun (Henyey-Greenstein peaks 28x isotropic at g 0.75); the reference has soft shafts, not a sheet
+            st.VolumetricNoise = 0.25f; st.VolumetricNoiseScale = 12f; st.VolumetricNoiseSpeed = 0.2f; st.VolumetricSun = 0.6f;
             st.VolumetricLights = 0f; st.VolumetricAmbient = 0.04f; st.VolumetricSteps = 20; st.VolumetricShadows = true;
             st.Apply();
 
@@ -574,6 +574,7 @@ namespace VortexEditor.Shell
             var ter = scene == null ? null : TemplateSetupSmoke.Find(scene, e => e.Name == "Oasis Terrain");
             if (ter == null) { log.Log("oasis capture: no oasis in this scene — skipped"); return true; }
             var cam = EditorCameraController.Instance;
+            Editor.DllWrapper.VortexAPI.SetPostMainView(true);   // the pictures are the game's: the grade, bloom and FXAA apply in the viewport as they do in play (off, the editor's build view stays clean)
             float px = cam.PositionX, py = cam.PositionY, pz = cam.PositionZ, yaw0 = cam.Yaw, pitch0 = cam.Pitch;
             bool gridWas = EditorViewportService.Instance.IsGridVisible, gizmosWere = EditorViewportService.Instance.AreGizmosVisible;
             bool playing = false;
@@ -664,6 +665,17 @@ namespace VortexEditor.Shell
                     Look(cam, eye, new Vector3(eye.X + viewDir.X * 30f, eye.Y + 6.5f, eye.Z + viewDir.Z * 30f));
                     await SmokeRegistry.Settle(1200);
                     await CameraSkySmoke.Sample("oasis_grove.bmp", 0.5, 0.5);
+                    // the same frame without the volumetric haze, then without the fog's sun glow and the bloom: which of them whites out the sun's side?
+                    {
+                        var stg = scene.Settings;
+                        bool vol = stg.VolumetricEnabled; float glow = stg.FogSunGlow, bloom = stg.BloomIntensity;
+                        stg.VolumetricEnabled = false; stg.Apply(); await SmokeRegistry.Settle(700); await CameraSkySmoke.Sample("oasis_grove_novol.bmp", 0.5, 0.5);
+                        stg.FogSunGlow = 0f; stg.BloomIntensity = 0f; stg.Apply(); await SmokeRegistry.Settle(700); await CameraSkySmoke.Sample("oasis_grove_noglow.bmp", 0.5, 0.5);
+                        stg.VolumetricEnabled = vol; stg.FogSunGlow = glow; stg.BloomIntensity = bloom; stg.Apply(); await SmokeRegistry.Settle(400);
+                        // the grade: the same frame nearly grey — proves the post colour grade reaches the picture (it seemed not to on 2026-10-11)
+                        float sat = stg.Saturation; stg.Saturation = 0.3f; stg.Apply(); await SmokeRegistry.Settle(500); await CameraSkySmoke.Sample("oasis_grove_desat.bmp", 0.5, 0.5);
+                        stg.Saturation = sat; stg.Apply(); await SmokeRegistry.Settle(300);
+                    }
                 }
                 // close-ups: the nearest bush and the nearest palm, the sun behind the camera
                 CloseUp(cam, ter, "Searsia burchellii", 4.5f, 1.4f);

@@ -419,6 +419,22 @@ float MacroNoise(float2 p)
     float2 i = floor(p), f = frac(p); f = f * f * (3.0 - 2.0 * f);
     return lerp(lerp(MacroHash(i), MacroHash(i + float2(1, 0)), f.x), lerp(MacroHash(i + float2(0, 1)), MacroHash(i + float2(1, 1)), f.x), f.y);
 }
+// Sand ripples (procedural): crests across the north-east wind, 14 cm apart, bent by noise, in patches — a long gentle
+// stoss slope towards the wind and a short steep lee; their tilt joins the normal within 45 m of the camera.
+float2 SandRipples(float2 p, float camDist, float sandW)
+{
+    float fade = saturate(1.0 - camDist / 45.0) * sandW;
+    if (fade < 0.002) return float2(0.0, 0.0);
+    const float2 wind = float2(0.59, 0.81);
+    float warp = MacroNoise(p * 0.9) * 2.0 - 1.0;
+    float patches = saturate(MacroNoise(p * 0.07 + 3.1) * 1.6 - 0.3);
+    float phase = (dot(p, wind) + 0.08 * warp) / 0.14;
+    float aa = saturate(1.0 - fwidth(phase) * 1.5);   // no shimmer where a ripple is thinner than a pixel
+    float f = frac(phase);
+    float slope = f < 0.7 ? 0.35 : -0.82;
+    slope *= smoothstep(0.0, 0.06, abs(f - 0.7)) * smoothstep(0.0, 0.04, min(f, 1.0 - f));   // rounded crests and troughs
+    return -slope * 0.22 * patches * fade * aa * wind;
+}
 float MacroVariation(float2 worldXZ)
 {
     float n = 0.65 * MacroNoise(worldXZ * 0.025) + 0.35 * MacroNoise(worldXZ * 0.11 + 7.3);
@@ -528,6 +544,7 @@ float4 PSMain(PS_IN input) : SV_TARGET
     if (HasNormalTexture != 0 && dot(nm, nm) > 1e-6)
     {
         if (UseDirectXNormals == 0) nm.y = -nm.y;
+        nm.xy += SandRipples(p, camDist, w.x + 0.5 * w.y);
         nm.xy *= NormalStrength;
         float3 T = normalize(float3(1.0, 0.0, 0.0) - Ng * Ng.x);
         float3 B = normalize(float3(0.0, 0.0, 1.0) - Ng * Ng.z);

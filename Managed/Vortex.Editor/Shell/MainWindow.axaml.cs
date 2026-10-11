@@ -106,6 +106,7 @@ namespace VortexEditor.Shell
                 var stdout = System.Console.Out;
                 console.EntryAdded += () => { try { if (console.Entries.Count > 0) { var le = console.Entries[console.Entries.Count - 1]; stdout.WriteLine("[" + le.LevelTag + "] " + le.Message); stdout.Flush(); } } catch { } };
                 SmokeRegistry.CaptureDir = o.CaptureDir;
+                _smokeInteractPending = true;   // the capture waits for the interaction chain (and the full smoke it starts), see SmokeCapture
                 DispatcherTimer.RunOnce(SmokeInteract, TimeSpan.FromSeconds(Math.Max(1, o.SmokeSeconds - 4)));
                 // the end-to-end play check (VORTEX_SMOKE_PLAYFIRE) compiles scripts + waits for the weapon draw: give it time
                 double captureAt = o.SmokeSeconds + (System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_PLAYFIRE") == "1" ? 30 : 0);
@@ -157,6 +158,9 @@ namespace VortexEditor.Shell
 
         /// <summary>Smoke test: select an entity, switch the tool, click into the viewport, check the mouse buttons,
         /// then run the full check list (VORTEX_SMOKE_FULL) or the play fire/aim check (VORTEX_SMOKE_PLAYFIRE).</summary>
+        private bool _smokeInteractPending;      // the interaction chain (click, mouse buttons, then the full smoke) has not handed over yet
+        private DateTime _smokeCaptureDeadline;   // the capture waits for that chain, but not forever
+
         private void SmokeInteract()
         {
             try
@@ -190,6 +194,7 @@ namespace VortexEditor.Shell
                         log.LogError("SMOKE FAIL viewport click / mouse buttons: the macOS screen is locked — synthetic clicks cannot be routed to an uncomposited window (unlock the Mac and re-run)");
                         if (System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_PLAYFIRE") == "1") log.LogError("SMOKE FAIL play: mouse fire/aim needs an unlocked screen");
                         else if (System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_FULL") == "1") SmokeFull(scene);
+                        _smokeInteractPending = false;
                         return;
                     }
                     // An activation in flight makes AppKit drop the event: wait for it, then post the click and give the
@@ -232,6 +237,7 @@ namespace VortexEditor.Shell
                                     else log.LogError("SMOKE FAIL mouse buttons do not reach Input.GetKey (" + r + ")");
                                     if (System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_PLAYFIRE") == "1") SmokePlayFire(ev);
                                     else if (System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_FULL") == "1") SmokeFull(scene);
+                                    _smokeInteractPending = false;
                                 }, TimeSpan.FromMilliseconds(200));
                             }, TimeSpan.FromMilliseconds(200));
                         }, TimeSpan.FromMilliseconds(200));
@@ -249,6 +255,7 @@ namespace VortexEditor.Shell
                     {
                         if (System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_PLAYFIRE") == "1") SmokePlayFire(ev);
                         else if (System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_FULL") == "1") SmokeFull(scene);
+                        _smokeInteractPending = false;
                     }
                     DispatcherTimer.RunOnce(() =>
                     {
@@ -282,7 +289,7 @@ namespace VortexEditor.Shell
                         }, TimeSpan.FromMilliseconds(400));
                     }, TimeSpan.FromMilliseconds(500));
                 }
-                else if (System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_FULL") == "1") SmokeFull(scene);
+                else { if (System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_FULL") == "1") SmokeFull(scene); _smokeInteractPending = false; }
                 if (System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_FX") == "1" && scene?.Settings != null)
                 {
                     // Same path as the Environment panel: SSAO + bloom + vignette, previewed in the build viewport.
@@ -297,7 +304,7 @@ namespace VortexEditor.Shell
                 }
                 BottomTabs.SelectedIndex = 0;
             }
-            catch (Exception ex) { System.Console.WriteLine("smoke interact failed: " + ex); }
+            catch (Exception ex) { System.Console.WriteLine("smoke interact failed: " + ex); _smokeInteractPending = false; }
         }
 
         /// <summary>Exercise the main command paths (create, undo/redo, components, save, secondary view, export) and log the outcome.</summary>
@@ -396,8 +403,11 @@ namespace VortexEditor.Shell
 
         private void SmokeCapture(string dir)
         {
-            // registered window checks may still be running (they open windows, render previews): wait for them
-            if (SmokeRegistry.Running) { DispatcherTimer.RunOnce(() => SmokeCapture(dir), TimeSpan.FromMilliseconds(500)); return; }
+            // registered window checks may still be running (they open windows, render previews): wait for them — and for the
+            // interaction chain that starts the full smoke. On a slow runner the start-up overran the smoke clock, the interact
+            // and capture timers fired back to back and the window closed before the first click was checked (CI, 2026-10-11).
+            if (_smokeCaptureDeadline == default) _smokeCaptureDeadline = DateTime.UtcNow.AddSeconds(240);
+            if (SmokeRegistry.Running || (_smokeInteractPending && DateTime.UtcNow < _smokeCaptureDeadline)) { DispatcherTimer.RunOnce(() => SmokeCapture(dir), TimeSpan.FromMilliseconds(500)); return; }
             try
             {
                 dir = string.IsNullOrEmpty(dir) ? Path.GetTempPath() : dir;

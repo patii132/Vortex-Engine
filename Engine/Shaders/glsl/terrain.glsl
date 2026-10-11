@@ -406,6 +406,22 @@ float macro_noise(vec2 p)
 	vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
 	return mix(mix(macro_hash(i), macro_hash(i + vec2(1, 0)), f.x), mix(macro_hash(i + vec2(0, 1)), macro_hash(i + vec2(1, 1)), f.x), f.y);
 }
+// Sand ripples (procedural): crests across the north-east wind, 14 cm apart, bent by noise, in patches — a long gentle
+// stoss slope towards the wind and a short steep lee; their tilt joins the normal within 45 m of the camera.
+vec2 sand_ripples(vec2 p, float cam_dist, float sand_w)
+{
+	float fade = clamp(1.0 - cam_dist / 45.0, 0.0, 1.0) * sand_w;
+	if (fade < 0.002) return vec2(0.0);
+	const vec2 wind = vec2(0.59, 0.81);
+	float warp = macro_noise(p * 0.9) * 2.0 - 1.0;
+	float patches = clamp(macro_noise(p * 0.07 + 3.1) * 1.6 - 0.3, 0.0, 1.0);
+	float phase = (dot(p, wind) + 0.08 * warp) / 0.14;
+	float aa = clamp(1.0 - fwidth(phase) * 1.5, 0.0, 1.0);   // no shimmer where a ripple is thinner than a pixel
+	float f = fract(phase);
+	float slope = f < 0.7 ? 0.35 : -0.82;
+	slope *= smoothstep(0.0, 0.06, abs(f - 0.7)) * smoothstep(0.0, 0.04, min(f, 1.0 - f));   // rounded crests and troughs
+	return -slope * 0.22 * patches * fade * aa * wind;
+}
 float macro_variation(vec2 world_xz)
 {
 	float n = 0.65 * macro_noise(world_xz * 0.025) + 0.35 * macro_noise(world_xz * 0.11 + 7.3);
@@ -499,6 +515,7 @@ void main()
 	if (obj.has_normal_texture != 0u && dot(nm, nm) > 1e-6)
 	{
 		if (obj.use_directx_normals == 0u) nm.y = -nm.y;
+		nm.xy += sand_ripples(p, cam_dist, w.x + 0.5 * w.y);
 		nm.xy *= obj.normal_strength;
 		vec3 T = normalize(vec3(1.0, 0.0, 0.0) - Ng * Ng.x);
 		vec3 B = normalize(vec3(0.0, 0.0, 1.0) - Ng * Ng.z);
