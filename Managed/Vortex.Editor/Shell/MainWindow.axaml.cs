@@ -265,27 +265,40 @@ namespace VortexEditor.Shell
                         {
                             if (posted && ev.PointerPressCount > presses) log.Log("SMOKE OK   viewport click routed to the toolkit (" + what + ")");
                             else log.LogError("SMOKE FAIL viewport click not received (" + what + ", posted=" + posted + ", presses=" + ev.PointerPressCount + ")");
-                            VortexEditor.Viewport.Win32ViewportInput.MouseButton(ev, top, false, true);
-                            DispatcherTimer.RunOnce(() =>
+                            // Each button state is WAITED for (up to 2 s, polled every 50 ms), not read after a fixed 200 ms: on the CI
+                            // runner's WARP device one frame can take longer than that, and the engine's key state only moves per frame
+                            // (the check failed there with the release still pending; 2026-10-11).
+                            void WaitFor(Func<bool> cond, Action<bool> then)
                             {
-                                bool lDown = Editor.Core.Input.HostInput.IsKeyDown(0x01);
-                                VortexEditor.Viewport.Win32ViewportInput.MouseButton(ev, top, false, false);
-                                VortexEditor.Viewport.Win32ViewportInput.MouseButton(ev, top, true, true);
-                                DispatcherTimer.RunOnce(() =>
+                                var started = DateTime.UtcNow;
+                                void Tick()
                                 {
-                                    bool lUp = !Editor.Core.Input.HostInput.IsKeyDown(0x01);
-                                    bool rDown = Editor.Core.Input.HostInput.IsKeyDown(0x02);
-                                    VortexEditor.Viewport.Win32ViewportInput.MouseButton(ev, top, true, false);
-                                    DispatcherTimer.RunOnce(() =>
+                                    bool ok = false; try { ok = cond(); } catch { }
+                                    if (ok || (DateTime.UtcNow - started).TotalMilliseconds > 2000) then(ok);
+                                    else DispatcherTimer.RunOnce(Tick, TimeSpan.FromMilliseconds(50));
+                                }
+                                DispatcherTimer.RunOnce(Tick, TimeSpan.FromMilliseconds(50));
+                            }
+                            VortexEditor.Viewport.Win32ViewportInput.MouseButton(ev, top, false, true);
+                            WaitFor(() => Editor.Core.Input.HostInput.IsKeyDown(0x01), lDown =>
+                            {
+                                VortexEditor.Viewport.Win32ViewportInput.MouseButton(ev, top, false, false);
+                                WaitFor(() => !Editor.Core.Input.HostInput.IsKeyDown(0x01), lUp =>
+                                {
+                                    VortexEditor.Viewport.Win32ViewportInput.MouseButton(ev, top, true, true);
+                                    WaitFor(() => Editor.Core.Input.HostInput.IsKeyDown(0x02), rDown =>
                                     {
-                                        bool rUp = !Editor.Core.Input.HostInput.IsKeyDown(0x02);
-                                        string r = "LButton down=" + lDown + " up=" + lUp + ", RButton down=" + rDown + " up=" + rUp;
-                                        if (lDown && lUp && rDown && rUp) log.Log("SMOKE OK   mouse buttons reach Input.GetKey (" + r + ")");
-                                        else log.LogError("SMOKE FAIL mouse buttons do not reach Input.GetKey (" + r + ")");
-                                        ContinueWin();
-                                    }, TimeSpan.FromMilliseconds(200));
-                                }, TimeSpan.FromMilliseconds(200));
-                            }, TimeSpan.FromMilliseconds(200));
+                                        VortexEditor.Viewport.Win32ViewportInput.MouseButton(ev, top, true, false);
+                                        WaitFor(() => !Editor.Core.Input.HostInput.IsKeyDown(0x02), rUp =>
+                                        {
+                                            string r = "LButton down=" + lDown + " up=" + lUp + ", RButton down=" + rDown + " up=" + rUp;
+                                            if (lDown && lUp && rDown && rUp) log.Log("SMOKE OK   mouse buttons reach Input.GetKey (" + r + ")");
+                                            else log.LogError("SMOKE FAIL mouse buttons do not reach Input.GetKey (" + r + ")");
+                                            ContinueWin();
+                                        });
+                                    });
+                                });
+                            });
                         }, TimeSpan.FromMilliseconds(400));
                     }, TimeSpan.FromMilliseconds(500));
                 }
