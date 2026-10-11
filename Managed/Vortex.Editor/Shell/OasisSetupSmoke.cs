@@ -423,16 +423,21 @@ namespace VortexEditor.Shell
         {
             var l = new List<FoliageType>();
             // the palms (Yughues' palm pack, 18 – 21 m at scale 1): the skyline of the oasis
-            foreach (var p in new[] { "palm_straight", "palm_bend", "palm_dual", "palm_dual_bend", "palm_trio" })
-                l.Add(T("Palm " + p.Substring(5), "Assets/Models/Palms/" + p + "/" + p + ".gltf", 0.42f, 0.7f, 4.5f, 650f, 0f, 0.45f, 13f, 1, 0.35f, 12f, false, 32f, 0.15f));
-            l.Add(T("Palm v2", "Assets/Models/Palms/palm_tree_v2/palm_tree_v2.gltf", 0.5f, 0.8f, 4.5f, 650f, 0f, 0.4f, 11f, 1, 0.3f, 11f, false, 32f, 0.15f));
+            // date palms (tools/palm-gen.py: a leaning trunk, 36–44 pinnate fronds in three rings, a skirt of dead fronds — the
+            // silhouette of the reference); real size, so the scale stays near 1. The two Yughues palms keep the mix varied.
+            l.Add(T("Palm straight", "Assets/Models/Palms/date_palm_a/date_palm_a.gltf", 0.8f, 1.15f, 4.5f, 650f, 0f, 0.45f, 10f, 1, 0.35f, 9f, false, 32f, 0.15f));
+            l.Add(T("Palm bend", "Assets/Models/Palms/date_palm_b/date_palm_b.gltf", 0.75f, 1.1f, 4.5f, 650f, 0f, 0.45f, 12f, 1, 0.35f, 12f, false, 32f, 0.15f));
+            l.Add(T("Palm dual", "Assets/Models/Palms/date_palm_c/date_palm_c.gltf", 0.85f, 1.25f, 4.5f, 650f, 0f, 0.45f, 8f, 1, 0.35f, 7f, false, 32f, 0.15f));
+            l.Add(T("Palm dual_bend", "Assets/Models/Palms/date_palm_a/date_palm_a.gltf", 0.7f, 1.0f, 4.5f, 650f, 0f, 0.45f, 10f, 1, 0.35f, 9f, false, 32f, 0.15f));
+            l.Add(T("Palm trio", "Assets/Models/Palms/palm_trio/palm_trio.gltf", 0.42f, 0.7f, 4.5f, 650f, 0f, 0.45f, 13f, 1, 0.35f, 12f, false, 32f, 0.15f));
+            l.Add(T("Palm v2", "Assets/Models/Palms/date_palm_b/date_palm_b.gltf", 0.65f, 0.95f, 4.5f, 650f, 0f, 0.45f, 12f, 1, 0.3f, 11f, false, 32f, 0.15f));
             // trees on the damp ground
             l.Add(T("Island tree 1", "Assets/Models/Oasis/island_tree_01/island_tree_01_lod.gltf", 0.9f, 1.4f, 6f, 320f, 0f, 0.15f, 5f, 1, 0.3f, 5f, false, 35f, 0.1f));
             l.Add(T("Island tree 2", "Assets/Models/Oasis/island_tree_02/island_tree_02_lod.gltf", 0.9f, 1.4f, 6f, 320f, 0f, 0.15f, 4f, 1, 0.3f, 4f, false, 35f, 0.1f));
             l.Add(T("Small tree", "Assets/Models/Oasis/tree_small_02/tree_small_02_lod.gltf", 0.9f, 1.3f, 6f, 320f, 0f, 0.15f, 4.5f, 1, 0.25f, 4.5f, false, 35f, 0.1f));
             // shrubs
-            l.Add(T("Searsia burchellii", "Assets/Models/Oasis/searsia_burchellii/searsia_burchellii_lod.gltf", 0.7f, 1.2f, 5f, 110f, 0f, 0.08f, 2.5f, 0, 0f, 0f, false, 45f, 0.08f));
-            l.Add(T("Searsia lucida", "Assets/Models/Oasis/searsia_lucida/searsia_lucida_lod.gltf", 0.8f, 1.3f, 4f, 110f, 0f, 0.08f, 2f, 0, 0f, 0f, false, 45f, 0.06f));
+            l.Add(T("Searsia burchellii", "Assets/Models/Palms/fern_a/fern_a.gltf", 0.8f, 1.3f, 1.6f, 160f, 60f, 0.12f, 1.2f, 0, 0f, 0f, true, 50f, 0.03f));   // fern clumps (tools/palm-gen.py --fern): the reference's undergrowth
+            l.Add(T("Searsia lucida", "Assets/Models/Palms/fern_b/fern_b.gltf", 0.7f, 1.2f, 1.8f, 160f, 60f, 0.12f, 1.2f, 0, 0f, 0f, true, 50f, 0.03f));
             l.Add(T("Rooibos", "Assets/Models/Oasis/wild_rooibos_bush/wild_rooibos_bush_lod.gltf", 0.9f, 1.6f, 2f, 90f, 40f, 0.06f, 0.6f, 0, 0f, 0f, true, 50f, 0.04f));
             l.Add(T("Didelta", "Assets/Models/Oasis/didelta_spinosa/didelta_spinosa_lod.gltf", 0.7f, 1.2f, 5f, 140f, 0f, 0.07f, 2f, 0, 0f, 0f, false, 45f, 0.1f));
             // the desert
@@ -485,8 +490,8 @@ namespace VortexEditor.Shell
                     hw < 0.8f || hw > 14f || ny < 0.85f || Proximity(x, z) > 1.2f ? 0f : 0.45f * grove(x + 50f, z - 30f) });
             }
             // the undergrowth of the groves: shrubs thick under the palms, thinning into the desert
-            specs.Add(new Spec { Type = types[9], Candidates = 140, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.75f : 0.07f) });
-            specs.Add(new Spec { Type = types[10], Candidates = 160, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.75f : 0.06f) });
+            specs.Add(new Spec { Type = types[9], Candidates = 1400, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.75f : 0.07f) });
+            specs.Add(new Spec { Type = types[10], Candidates = 1600, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.75f : 0.06f) });
             specs.Add(new Spec { Type = types[11], Candidates = 2600, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.4f || ny < 0.75f ? 0f : (Proximity(x, z) < 1.4f ? 0.7f : 0.12f) * grove(x * 1.5f, z * 1.5f) });
             specs.Add(new Spec { Type = types[12], Candidates = 1100, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.6f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.55f : 0.08f) });
             // dead fronds and leaves on the grove floor, stones and pebbles along the water line (the reference's shore)
@@ -605,6 +610,25 @@ namespace VortexEditor.Shell
                 Look(cam, At(ter, -24f, -58f, 1.7f), new Vector3(-34f, WaterLevel + 0.3f, 40f));
                 await SmokeRegistry.Settle(800);
                 await CameraSkySmoke.Sample("oasis_shore.bmp", 0.5, 0.5);
+                // the grove: eye height on the grove floor west of the big lake, looking INTO the low sun through the crowns —
+                // long shadows towards the camera, sun shafts, the ferns lit from behind (the reference's grove pictures)
+                {
+                    var sunE = TemplateSetupSmoke.Find(scene, e => e.Name == "Sun");
+                    var toSunDir = new Vector3(0.43f, 0.0f, 0.55f);
+                    if (sunE != null)
+                    {
+                        float yd = sunE.Transform.LocalRotation.Y * (float)Math.PI / 180f, pd = sunE.Transform.LocalRotation.X * (float)Math.PI / 180f;
+                        // the light travels along the entity's forward; towards the sun is the opposite, flattened
+                        var fwd = new Vector3((float)(Math.Sin(yd) * Math.Cos(pd)), (float)(-Math.Sin(pd)), (float)(Math.Cos(yd) * Math.Cos(pd)));
+                        toSunDir = new Vector3(-fwd.X, 0f, -fwd.Z);
+                    }
+                    float tl = (float)Math.Sqrt(toSunDir.X * toSunDir.X + toSunDir.Z * toSunDir.Z); if (tl < 1e-3f) tl = 1f;
+                    toSunDir = new Vector3(toSunDir.X / tl, 0f, toSunDir.Z / tl);
+                    var eye = At(ter, -96f, 6f, 1.6f);
+                    Look(cam, eye, new Vector3(eye.X + toSunDir.X * 30f, eye.Y + 4.5f, eye.Z + toSunDir.Z * 30f));
+                    await SmokeRegistry.Settle(1200);
+                    await CameraSkySmoke.Sample("oasis_grove.bmp", 0.5, 0.5);
+                }
                 // close-ups: the nearest bush and the nearest palm, the sun behind the camera
                 CloseUp(cam, ter, "Searsia burchellii", 4.5f, 1.4f);
                 await SmokeRegistry.Settle(800);
@@ -612,6 +636,41 @@ namespace VortexEditor.Shell
                 CloseUp(cam, ter, "Palm straight", 14f, 6f);
                 await SmokeRegistry.Settle(800);
                 await CameraSkySmoke.Sample("oasis_palm.bmp", 0.5, 0.5);
+                // a palm base from 3 m: the trunk must stand IN the sand (trunks floated on 2026-10-11) — and the numbers behind it
+                {
+                    var fol2 = TemplateSetupSmoke.Find(scene, e => e.GetComponent<FoliageComponent>() != null);
+                    FoliageData fd2;
+                    if (fol2 != null && FoliageService.TryGetData(fol2, out fd2))
+                    {
+                        var layer = fd2.Layer("Palm straight", false);
+                        if (layer != null && layer.Count > 0)
+                        {
+                            var inst = layer.Instances[layer.Count / 2];
+                            float gh; TerrainService.TryHeight(ter, inst.Position.X, inst.Position.Z, out gh);
+                            log.Log("oasis base: instance y " + inst.Position.Y.ToString("0.00") + ", terrain " + gh.ToString("0.00") + " at (" + inst.Position.X.ToString("0.0") + ", " + inst.Position.Z.ToString("0.0") + "), scale " + inst.Scale.ToString("0.00"));
+                            // the engine-side mesh: does the imported palm start at y 0 as the file says?
+                            var subs = SceneRenderService.LoadModelSubmeshes("Assets/Models/Palms/date_palm_a/date_palm_a.gltf");
+                            if (subs != null)
+                                for (int si = 0; si < subs.Length; si++)
+                                {
+                                    float sx, sy, sz, cx, cy, cz;
+                                    Editor.DllWrapper.VortexAPI.GetMeshBounds(subs[si].MeshId, out sx, out sy, out sz);
+                                    Editor.DllWrapper.VortexAPI.GetMeshBoundsCenter(subs[si].MeshId, out cx, out cy, out cz);
+                                    log.Log("oasis base: palm submesh " + si + " mesh " + subs[si].MeshId + " size (" + sx.ToString("0.00") + ", " + sy.ToString("0.00") + ", " + sz.ToString("0.00") + ") centre (" + cx.ToString("0.00") + ", " + cy.ToString("0.00") + ", " + cz.ToString("0.00") + ") bottom y " + (cy - sy * 0.5f).ToString("0.00"));
+                                }
+                            var target = new Vector3(inst.Position.X, inst.Position.Y + 0.5f, inst.Position.Z);
+                            Look(cam, At(ter, inst.Position.X + 2.2f, inst.Position.Z + 2.2f, 0.7f), target);
+                            await SmokeRegistry.Settle(800);
+                            await CameraSkySmoke.Sample("oasis_base.bmp", 0.5, 0.5);
+                            // the same view without the far dunes, then without the oasis terrain: which sheet is the visible floor?
+                            var farT = TemplateSetupSmoke.Find(scene, e => e.Name == "Far Dunes");
+                            if (farT != null) { farT.IsActive = false; EditorViewportSession.RequestResubmit(); await SmokeRegistry.Settle(800); await CameraSkySmoke.Sample("oasis_base_nofar.bmp", 0.5, 0.5); farT.IsActive = true; }
+                            ter.IsActive = false; EditorViewportSession.RequestResubmit(); await SmokeRegistry.Settle(800); await CameraSkySmoke.Sample("oasis_base_nooasis.bmp", 0.5, 0.5); ter.IsActive = true;
+                            EditorViewportSession.RequestResubmit(); await SmokeRegistry.Settle(600);
+                            log.Log("oasis base: chunk submits last frame " + TerrainService.LastChunkSubmits);
+                        }
+                    }
+                }
                 // across the east lake towards the escarpment
                 Look(cam, At(ter, 40f, 30f, 1.8f), new Vector3(90f, WaterLevel + 2f, -120f));
                 await SmokeRegistry.Settle(800);
