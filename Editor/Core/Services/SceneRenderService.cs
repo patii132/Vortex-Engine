@@ -2418,6 +2418,8 @@ namespace Editor.Core.Services
 
         private bool _hasSceneLights = false;
         private bool _hasDirectionalLight = false;
+        // the sun as last submitted (the sky light's ground bounce reads it): colour × intensity and the direction's y
+        private float _sunR = 1f, _sunG = 1f, _sunB = 1f, _sunIntensity = 0f, _sunDirY = -1f;
         /// <summary>With <see cref="DebugThirdPersonView"/>: render the first-person viewmodel (layer 1) as world
         /// geometry and hide the third-person body — for inspecting the FP arms + weapon from outside
         /// (VM_DBGCAM_FP=1 in the standalone player).</summary>
@@ -2510,6 +2512,14 @@ namespace Editor.Core.Services
                     c = SkyLight.FromGradient(skybox.TopColorR * e, skybox.TopColorG * e, skybox.TopColorB * e, skybox.HorizonColorR * e, skybox.HorizonColorG * e, skybox.HorizonColorB * e, skybox.BottomColorR * e, skybox.BottomColorG * e, skybox.BottomColorB * e);
             }
             catch { c = null; }
+            // the ground bounce: the sun's light off the ground into the shadows (scene settings)
+            try
+            {
+                var st = Data.ProjectData.Current?.ActiveScene?.Settings;
+                if (st != null && st.BounceStrength > 0f)
+                    c = SkyLight.WithGroundBounce(c, st.BounceStrength, st.BounceR, st.BounceG, st.BounceB, _sunR, _sunG, _sunB, _sunIntensity, _sunDirY);
+            }
+            catch { }
             PushSkyLight(c);
             SkyLight.ReflectionMap m = null;
             try
@@ -2545,6 +2555,14 @@ namespace Editor.Core.Services
                     c = SkyLight.FromGradient(g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7], g[8]);
             }
             catch { c = null; }
+            // the ground bounce: the sun's light off the ground into the shadows (scene settings)
+            try
+            {
+                var st = Data.ProjectData.Current?.ActiveScene?.Settings;
+                if (st != null && st.BounceStrength > 0f)
+                    c = SkyLight.WithGroundBounce(c, st.BounceStrength, st.BounceR, st.BounceG, st.BounceB, _sunR, _sunG, _sunB, _sunIntensity, _sunDirY);
+            }
+            catch { }
             PushSkyLight(c);
             SkyLight.ReflectionMap m = null;
             try
@@ -2701,6 +2719,7 @@ namespace Editor.Core.Services
                     {
                         case ECS.Components.Lighting.LightType.Directional:
                             _hasDirectionalLight = true;
+                            _sunR = light.ColorR; _sunG = light.ColorG; _sunB = light.ColorB; _sunIntensity = light.Intensity; _sunDirY = dirY;
                             // CSM (#24): ShadowType != None turns on the sun's cascade pass. Bias mapping:
                             // the component's legacy 0.05 default scales by 0.016 to land on the tuned
                             // CSM NDC bias (0.0008); user tweaks stay proportional (same idea as spots).

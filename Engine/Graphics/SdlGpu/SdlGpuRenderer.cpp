@@ -851,7 +851,7 @@ namespace vortex::graphics::sdlgpu
 			const auto& p = m_postfx.params();
 			cb.texel[0] = 1.0f / (float)w; cb.texel[1] = 1.0f / (float)h;
 			cb.time = elapsed_seconds();
-			cb.flags = (p.vignette ? 1u : 0u) | (p.grain ? 2u : 0u) | (p.ca ? 4u : 0u) | (p.debug_invert ? 8u : 0u) | (p.grade ? 16u : 0u);
+			cb.flags = (p.vignette ? 1u : 0u) | (p.grain ? 2u : 0u) | (p.ca ? 4u : 0u) | (p.debug_invert ? 8u : 0u) | (p.grade ? 16u : 0u) | (p.fxaa ? 64u : 0u);
 			cb.vignette[0] = p.vig_intensity; cb.vignette[1] = p.vig_smoothness; cb.vignette[2] = p.vig_roundness;
 			cb.vignette_color[0] = p.vig_r; cb.vignette_color[1] = p.vig_g; cb.vignette_color[2] = p.vig_b;
 			cb.grain_ca[0] = p.grain_intensity; cb.grain_ca[1] = p.grain_size; cb.grain_ca[2] = p.ca_strength; cb.grain_ca[3] = p.ca_falloff;

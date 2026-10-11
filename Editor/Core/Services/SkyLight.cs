@@ -21,6 +21,26 @@ namespace Editor.Core.Services
         }
 
         private static readonly Dictionary<string, Coefficients> _cache = new Dictionary<string, Coefficients>();
+
+        /// <summary>The sun's light bounced off the ground: a uniform radiance over the lower hemisphere added to the sky's
+        /// coefficients — ground albedo × sun irradiance (intensity × the sun's height) / π × strength. Returns a new set (the
+        /// cached sky stays as it is) keyed by its inputs, or the input when there is nothing to add.</summary>
+        public static Coefficients WithGroundBounce(Coefficients sky, float strength, float albedoR, float albedoG, float albedoB,
+            float sunR, float sunG, float sunB, float sunIntensity, float sunDirY)
+        {
+            if (sky == null || strength <= 0f || sunIntensity <= 0f) return sky;
+            float up = sunDirY < 0f ? -sunDirY : 0f;   // the light travels down: -y = sin(elevation)
+            if (up <= 0.001f) return sky;
+            float k = strength * sunIntensity * up / 3.14159265f;
+            float lr = albedoR * sunR * k, lg = albedoG * sunG * k, lb = albedoB * sunB * k;
+            var c = new Coefficients();
+            Array.Copy(sky.Sh, c.Sh, 27);
+            // a constant radiance L over the lower hemisphere projects to Y00: 2π·0.282095·L and Y1y: -π·0.488603·L
+            c.Sh[0] += 1.772454f * lr; c.Sh[1] += 1.772454f * lg; c.Sh[2] += 1.772454f * lb;
+            c.Sh[3] -= 1.534990f * lr; c.Sh[4] -= 1.534990f * lg; c.Sh[5] -= 1.534990f * lb;
+            c.Key = sky.Key + "|bounce|" + lr.ToString("0.000") + "," + lg.ToString("0.000") + "," + lb.ToString("0.000");
+            return c;
+        }
         private const int Width = 256, Height = 128;
 
         /// <summary>The sky light of an equirect picture (.hdr read as float, anything else through 8-bit sRGB), cached by path.</summary>

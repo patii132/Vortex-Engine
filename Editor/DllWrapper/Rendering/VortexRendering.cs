@@ -1042,6 +1042,16 @@ namespace Editor.DllWrapper
             try { SetPostFxColorGrade(enabled, exposure, contrast, saturation, temperature, tint); } catch { }
         }
 
+        [DllImport(_dllName, CallingConvention = _cc)]
+        private static extern void SetPostFxAntiAlias([MarshalAs(UnmanagedType.I1)] bool enabled);
+
+        /// <summary>Anti-aliasing (FXAA 3.11 console variant) in the post pass on the LDR picture — nine taps, no history, the
+        /// cheap edge smoothing until temporal AA. Persistent like the other post effects.</summary>
+        public static void SetPostAntiAlias(bool enabled)
+        {
+            try { SetPostFxAntiAlias(enabled); } catch { }
+        }
+
         /// <summary>Post-FX bloom (#30): soft-knee bright-pass -> progressive mip chain -> additive
         /// glow composite. threshold = brightness where glow starts (SDR 0..~1.5), knee = soft width,
         /// intensity = composite strength (0 = bit-exact passthrough), scatter = glow spread (0..1).</summary>

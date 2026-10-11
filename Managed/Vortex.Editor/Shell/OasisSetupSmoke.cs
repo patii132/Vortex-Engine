@@ -247,6 +247,8 @@ namespace VortexEditor.Shell
             // ---- the air: warm haze that thins with height, a touch of bloom and AO, no vignette ----
             var st = scene.Settings;
             st.Tonemapper = 1;         // PBR Neutral: the sand stays orange, the sky blue — the ACES fit washed both towards white
+            st.AntiAliasEnabled = true;   // FXAA: the fronds and the ripples stop flickering
+            st.BounceStrength = 0.55f; st.BounceR = 0.60f; st.BounceG = 0.42f; st.BounceB = 0.26f;   // the sand's warm bounce into the shadows
             st.SceneExposure = 2.6f;   // stops before the tonemapper: the low sun needs more aperture than noon (the sand stays bright, the shadows sky-lit)
             st.FogEnabled = true; st.FogDensity = 0.0007f; st.FogHeightY = -4f; st.FogHeightFalloff = 0.012f;
             st.FogR = 0.52f; st.FogG = 0.50f; st.FogB = 0.50f; st.FogSunGlow = 0.6f;   // the warm late-afternoon haze, glowing towards the low sun
@@ -417,16 +419,16 @@ namespace VortexEditor.Shell
             var l = new List<FoliageType>();
             // the palms (Yughues' palm pack, 18 – 21 m at scale 1): the skyline of the oasis
             foreach (var p in new[] { "palm_straight", "palm_bend", "palm_dual", "palm_dual_bend", "palm_trio" })
-                l.Add(T("Palm " + p.Substring(5), "Assets/Models/Palms/" + p + "/" + p + ".gltf", 0.42f, 0.7f, 4.5f, 900f, 0f, 0.45f, 13f, 1, 0.35f, 12f, false, 32f, 0.15f));
-            l.Add(T("Palm v2", "Assets/Models/Palms/palm_tree_v2/palm_tree_v2.gltf", 0.5f, 0.8f, 4.5f, 900f, 0f, 0.4f, 11f, 1, 0.3f, 11f, false, 32f, 0.15f));
+                l.Add(T("Palm " + p.Substring(5), "Assets/Models/Palms/" + p + "/" + p + ".gltf", 0.42f, 0.7f, 4.5f, 650f, 0f, 0.45f, 13f, 1, 0.35f, 12f, false, 32f, 0.15f));
+            l.Add(T("Palm v2", "Assets/Models/Palms/palm_tree_v2/palm_tree_v2.gltf", 0.5f, 0.8f, 4.5f, 650f, 0f, 0.4f, 11f, 1, 0.3f, 11f, false, 32f, 0.15f));
             // trees on the damp ground
             l.Add(T("Island tree 1", "Assets/Models/Oasis/island_tree_01/island_tree_01_lod.gltf", 0.9f, 1.4f, 6f, 320f, 0f, 0.15f, 5f, 1, 0.3f, 5f, false, 35f, 0.1f));
             l.Add(T("Island tree 2", "Assets/Models/Oasis/island_tree_02/island_tree_02_lod.gltf", 0.9f, 1.4f, 6f, 320f, 0f, 0.15f, 4f, 1, 0.3f, 4f, false, 35f, 0.1f));
             l.Add(T("Small tree", "Assets/Models/Oasis/tree_small_02/tree_small_02_lod.gltf", 0.9f, 1.3f, 6f, 320f, 0f, 0.15f, 4.5f, 1, 0.25f, 4.5f, false, 35f, 0.1f));
             // shrubs
-            l.Add(T("Searsia burchellii", "Assets/Models/Oasis/searsia_burchellii/searsia_burchellii_lod.gltf", 0.7f, 1.2f, 5f, 150f, 0f, 0.08f, 2.5f, 0, 0f, 0f, false, 45f, 0.08f));
-            l.Add(T("Searsia lucida", "Assets/Models/Oasis/searsia_lucida/searsia_lucida_lod.gltf", 0.8f, 1.3f, 4f, 140f, 0f, 0.08f, 2f, 0, 0f, 0f, false, 45f, 0.06f));
-            l.Add(T("Rooibos", "Assets/Models/Oasis/wild_rooibos_bush/wild_rooibos_bush_2k.gltf", 0.9f, 1.6f, 2f, 120f, 50f, 0.06f, 0.6f, 0, 0f, 0f, true, 50f, 0.04f));
+            l.Add(T("Searsia burchellii", "Assets/Models/Oasis/searsia_burchellii/searsia_burchellii_lod.gltf", 0.7f, 1.2f, 5f, 110f, 0f, 0.08f, 2.5f, 0, 0f, 0f, false, 45f, 0.08f));
+            l.Add(T("Searsia lucida", "Assets/Models/Oasis/searsia_lucida/searsia_lucida_lod.gltf", 0.8f, 1.3f, 4f, 110f, 0f, 0.08f, 2f, 0, 0f, 0f, false, 45f, 0.06f));
+            l.Add(T("Rooibos", "Assets/Models/Oasis/wild_rooibos_bush/wild_rooibos_bush_lod.gltf", 0.9f, 1.6f, 2f, 90f, 40f, 0.06f, 0.6f, 0, 0f, 0f, true, 50f, 0.04f));
             l.Add(T("Didelta", "Assets/Models/Oasis/didelta_spinosa/didelta_spinosa_lod.gltf", 0.7f, 1.2f, 5f, 140f, 0f, 0.07f, 2f, 0, 0f, 0f, false, 45f, 0.1f));
             // the desert
             l.Add(T("Quiver tree 1", "Assets/Models/Oasis/quiver_tree_01/quiver_tree_01_lod.gltf", 1.3f, 2.2f, 6f, 400f, 0f, 0.05f, 4f, 1, 0.25f, 4f, false, 40f, 0.06f));
@@ -435,7 +437,7 @@ namespace VortexEditor.Shell
             l.Add(T("Dry leaf", "Assets/Models/Oasis/dry_quiver_leaf/dry_quiver_leaf_lod.gltf", 1f, 1.6f, 1.2f, 100f, 40f, 0f, 0.4f, 0, 0f, 0f, true, 50f, 0.0f));
             l.Add(T("Dead trunk", "Assets/Models/Oasis/dead_quiver_trunk/dead_quiver_trunk_lod.gltf", 1f, 1.8f, 5f, 260f, 0f, 0f, 2f, 1, 0.2f, 2f, false, 45f, 0.12f));
             // grass and reeds at the water
-            l.Add(T("Grass", "Assets/Models/Oasis/grass_medium_02/grass_medium_02_lod.gltf", 1.2f, 2.2f, 0.7f, 120f, 35f, 0.05f, 0.5f, 0, 0f, 0f, true, 55f, 0.04f));
+            l.Add(T("Grass", "Assets/Models/Oasis/grass_medium_02/grass_medium_02_lod.gltf", 1.2f, 2.2f, 0.7f, 90f, 30f, 0.05f, 0.5f, 0, 0f, 0f, true, 55f, 0.04f));
             l.Add(T("Bermuda grass", "Assets/Models/Oasis/grass_bermuda_01/grass_bermuda_01_lod.gltf", 1.8f, 3.2f, 0.55f, 90f, 30f, 0.03f, 0.3f, 0, 0f, 0f, true, 55f, 0.02f));
             // the rocks
             l.Add(T("Boulder 2", "Assets/Models/Rocks/namaqualand_boulder_02/namaqualand_boulder_02_lod.gltf", 0.8f, 1.8f, 5f, 380f, 0f, 0f, 1f, 2, 0f, 0f, true, 60f, 0.2f));
@@ -478,10 +480,10 @@ namespace VortexEditor.Shell
                     hw < 0.8f || hw > 14f || ny < 0.85f || Proximity(x, z) > 1.2f ? 0f : 0.45f * grove(x + 50f, z - 30f) });
             }
             // the undergrowth of the groves: shrubs thick under the palms, thinning into the desert
-            specs.Add(new Spec { Type = types[9], Candidates = 520, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.75f : 0.07f) });
-            specs.Add(new Spec { Type = types[10], Candidates = 700, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.75f : 0.06f) });
-            specs.Add(new Spec { Type = types[11], Candidates = 3500, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.4f || ny < 0.75f ? 0f : (Proximity(x, z) < 1.4f ? 0.7f : 0.12f) * grove(x * 1.5f, z * 1.5f) });
-            specs.Add(new Spec { Type = types[12], Candidates = 900, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.6f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.55f : 0.08f) });
+            specs.Add(new Spec { Type = types[9], Candidates = 140, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.75f : 0.07f) });
+            specs.Add(new Spec { Type = types[10], Candidates = 160, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.75f : 0.06f) });
+            specs.Add(new Spec { Type = types[11], Candidates = 2600, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.4f || ny < 0.75f ? 0f : (Proximity(x, z) < 1.4f ? 0.7f : 0.12f) * grove(x * 1.5f, z * 1.5f) });
+            specs.Add(new Spec { Type = types[12], Candidates = 1100, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.6f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.55f : 0.08f) });
             // dead fronds and leaves on the grove floor, stones and pebbles along the water line (the reference's shore)
             specs.Add(new Spec { Type = types[16], Candidates = 2500, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.4f || hw > 12f || ny < 0.8f || Proximity(x, z) > 1.2f ? 0f : 0.6f * grove(x, z) });
             specs.Add(new Spec { Type = types[24], Candidates = 3000, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.1f || hw > 1.4f ? 0f : 0.7f });
@@ -494,8 +496,8 @@ namespace VortexEditor.Shell
             specs.Add(new Spec { Type = types[16], Candidates = 3000, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.4f || ny < 0.8f ? 0f : 0.3f });
             specs.Add(new Spec { Type = types[17], Candidates = 500, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.85f ? 0f : (Proximity(x, z) < 2.2f ? 0.25f : 0.05f) });
             // grass at the water
-            specs.Add(new Spec { Type = types[18], Candidates = 16000, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.2f || hw > 6.5f || ny < 0.8f || Proximity(x, z) > 1.15f ? 0f : 0.9f * (0.4f + 0.6f * grove(x - 20f, z + 40f)) });
-            specs.Add(new Spec { Type = types[19], Candidates = 12000, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.12f || hw > 2.8f || ny < 0.8f ? 0f : 0.95f });
+            specs.Add(new Spec { Type = types[18], Candidates = 7000, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.2f || hw > 6.5f || ny < 0.8f || Proximity(x, z) > 1.15f ? 0f : 0.9f * (0.4f + 0.6f * grove(x - 20f, z + 40f)) });
+            specs.Add(new Spec { Type = types[19], Candidates = 6000, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.12f || hw > 2.8f || ny < 0.8f ? 0f : 0.95f });
             // rocks: boulders on the gravel and below the escarpment, cliffs along its edge, stones everywhere, flat rocks on the plains, three formations on the dunes
             for (int i = 20; i < 23; i++)
             {
@@ -689,7 +691,9 @@ namespace VortexEditor.Shell
                     await CameraSkySmoke.Sample("oasis_zombie.bmp", 0.5, 0.5);
                     log.Log("oasis capture: " + count + " zombies in play, nearest " + (nearest != null ? best.ToString("0") + " m from the player" : "none"));
                 }
-                log.Log("oasis capture: wide / shore / east lake / dunes / top captured; " + FoliageService.LastInstancesDrawn + " instances in the last frame, " + FoliageService.LastDrawCalls + " draws");
+                log.Log("oasis capture: wide / shore / east lake / dunes / top captured; " + FoliageService.LastInstancesDrawn + " instances in the last frame, " + FoliageService.LastDrawCalls + " draws, " + Editor.DllWrapper.VortexAPI.CurrentFPS + " fps in the editor viewport");
+                // ---- the performance probe: the frame rate of the wide view with one feature at a time switched off ----
+                await PerfProbe(scene, ter, cam, log);
                 return true;
             }
             finally
@@ -729,6 +733,47 @@ namespace VortexEditor.Shell
             var cam = e.GetComponent<Camera>();
             if (cam != null && cam.FarClip < far) cam.FarClip = far;
             if (e.Children != null) foreach (var c in e.Children) SetFarClip(c, far);
+        }
+
+        /// <summary>Where the milliseconds go: the frame rate of the wide view, then with one feature at a time switched off
+        /// (volumetric fog, FXAA, soft → hard → no sun shadows, the vegetation, the far dunes, the water, SSAO + bloom), everything
+        /// restored afterwards. The renderer's fps counter updates once a second, so every reading waits two.</summary>
+        private static async Task PerfProbe(Scene scene, GameEntity ter, EditorCameraController cam, ConsoleService log)
+        {
+            var st = scene.Settings;
+            var sunE = TemplateSetupSmoke.Find(scene, e => e.GetComponent<Light>() != null && e.GetComponent<Light>().LightType == LightType.Directional);
+            var sun = sunE?.GetComponent<Light>();
+            var fol = TemplateSetupSmoke.Find(scene, e => e.GetComponent<FoliageComponent>() != null);
+            var far = TemplateSetupSmoke.Find(scene, e => e.Name == "Far Dunes");
+            var lakes = new List<GameEntity>();
+            foreach (var e in scene.Entities) if (e != null && e.GetComponent<WaterComponent>() != null) lakes.Add(e);
+            Look(cam, At(ter, 205f, 150f, 42f), new Vector3(0f, WaterLevel - 2f, -8f));
+            var sb = new System.Text.StringBuilder();
+            async Task<int> Read(string what)
+            {
+                EditorViewportSession.RequestResubmit();
+                await SmokeRegistry.Settle(2300);
+                int fps = Editor.DllWrapper.VortexAPI.CurrentFPS;
+                sb.Append(what).Append(' ').Append(fps).Append(" fps | ");
+                return fps;
+            }
+            await Read("baseline");
+            bool vol = st.VolumetricEnabled; st.VolumetricEnabled = false; st.Apply(); await Read("no volumetrics"); st.VolumetricEnabled = vol; st.Apply();
+            bool aa = st.AntiAliasEnabled; st.AntiAliasEnabled = false; st.Apply(); await Read("no FXAA"); st.AntiAliasEnabled = aa; st.Apply();
+            if (sun != null)
+            {
+                var shadow = sun.ShadowType;
+                sun.ShadowType = ShadowType.Hard; await Read("hard sun shadows");
+                sun.ShadowType = ShadowType.None; await Read("no sun shadows");
+                sun.ShadowType = shadow;
+            }
+            if (fol != null) { fol.IsActive = false; await Read("no vegetation"); fol.IsActive = true; }
+            if (far != null) { far.IsActive = false; await Read("no far dunes"); far.IsActive = true; }
+            foreach (var l in lakes) l.IsActive = false; await Read("no water"); await Read("no water (2nd read)"); foreach (var l in lakes) l.IsActive = true;
+            bool ao = st.AoEnabled, bloom = st.BloomEnabled; st.AoEnabled = false; st.BloomEnabled = false; st.Apply(); await Read("no SSAO + bloom"); st.AoEnabled = ao; st.BloomEnabled = bloom; st.Apply();
+            EditorViewportSession.RequestResubmit();
+            await SmokeRegistry.Settle(800);
+            log.Log("oasis perf: " + sb.ToString());
         }
 
         private static Vector3 At(GameEntity ter, float x, float z, float above)

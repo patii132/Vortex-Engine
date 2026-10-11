@@ -110,6 +110,9 @@ namespace VortexEditor.Claude.Tools
             [Description("Height (m) up to which the fog is uniform")] float? fog_height_y = null,
             [Description("Height falloff per metre above it (0 = no height fog)")] float fog_height_falloff = -1f,
             [Description("Aerial perspective: the sun's glow in the fog when looking towards it (0 = off, 0.3–0.6 a desert noon, 1–2 a low sun)")] float? fog_sun_glow = null,
+            [Description("Anti-aliasing (FXAA) on / off")] bool? anti_alias = null,
+            [Description("Ground bounce strength: the sun's light bounced off the ground into the shadows (0 = off, a desert 0.4–0.7)")] float? bounce_strength = null,
+            [Description("Ground bounce colour [r, g, b] — the ground's albedo (sand 0.55, 0.40, 0.26)")] float[] bounce_color = null,
             [Description("Tonemapper: 'aces' (classic filmic, bright saturated colours drift towards white) or 'neutral' (Khronos PBR Neutral, hue-preserving — a sunlit desert stays orange)")] string tonemapper = null,
             [Description("Scene exposure in stops BEFORE the tonemapper — the camera's aperture (0 = classic; +1.5…+2.5 a sunlit desert, −1 a night). Brightens without clipping, unlike the grading exposure")] float? scene_exposure = null,
             [Description("SSAO on / off")] bool? ao = null,
@@ -141,6 +144,9 @@ namespace VortexEditor.Claude.Tools
             if (fog_sun_glow.HasValue) st.FogSunGlow = fog_sun_glow.Value;
             if (scene_exposure.HasValue) st.SceneExposure = scene_exposure.Value;
             if (!string.IsNullOrEmpty(tonemapper)) st.Tonemapper = tonemapper.Trim().ToLowerInvariant().StartsWith("neutral") ? 1 : 0;
+            if (anti_alias.HasValue) st.AntiAliasEnabled = anti_alias.Value;
+            if (bounce_strength.HasValue) st.BounceStrength = bounce_strength.Value;
+            if (bounce_color != null && bounce_color.Length >= 3) { st.BounceR = bounce_color[0]; st.BounceG = bounce_color[1]; st.BounceB = bounce_color[2]; }
             if (ao.HasValue) st.AoEnabled = ao.Value;
             if (ao_radius >= 0f) st.AoRadius = ao_radius;
             if (ao_intensity >= 0f) st.AoIntensity = ao_intensity;
@@ -276,7 +282,8 @@ namespace VortexEditor.Claude.Tools
 
         private static object Info(SceneSettings st) => new
         {
-            exposure = new { scene_stops = st.SceneExposure, tonemapper = st.Tonemapper == 1 ? "neutral" : "aces" },
+            exposure = new { scene_stops = st.SceneExposure, tonemapper = st.Tonemapper == 1 ? "neutral" : "aces", anti_alias = st.AntiAliasEnabled },
+            bounce = new { strength = st.BounceStrength, color = new[] { st.BounceR, st.BounceG, st.BounceB } },
             fog = new { on = st.FogEnabled, density = st.FogDensity, color = new[] { st.FogR, st.FogG, st.FogB }, height_y = st.FogHeightY, height_falloff = st.FogHeightFalloff, sun_glow = st.FogSunGlow },
             ao = new { on = st.AoEnabled, radius = st.AoRadius, intensity = st.AoIntensity },
             bloom = new { on = st.BloomEnabled, threshold = st.BloomThreshold, intensity = st.BloomIntensity },

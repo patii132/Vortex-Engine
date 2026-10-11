@@ -51,6 +51,7 @@ namespace vortex::graphics::dx12
 			float ca_falloff{ 1.2f };        // radial power (higher = clean center, smeared edges)
 			// Color grading (#31)
 			bool grade{ false };
+			bool fxaa{ false };              // FXAA 3.11 (console variant) on the LDR picture — the cheap anti-aliasing until TAA
 			float exposure{ 0.0f };          // EV stops (2^EV); 0 = neutral
 			float contrast{ 1.0f };          // 1 = neutral
 			float saturation{ 1.0f };        // 1 = neutral, 0 = greyscale
@@ -76,7 +77,7 @@ namespace vortex::graphics::dx12
 		bool active() const
 		{
 			return m_pso && (m_params.vignette || m_params.grain || m_params.ca
-				|| m_params.grade || m_params.debug_invert || bloom_requested());
+				|| m_params.grade || m_params.fxaa || m_params.debug_invert || bloom_requested());
 		}
 
 		// Bloom runs only when its PSOs built (shader present) AND intensity is meaningful —

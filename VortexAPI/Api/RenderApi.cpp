@@ -652,6 +652,13 @@ EDITOR_INTERFACE void SetPostFxChromaticAberration(bool enabled, float strength,
 
 // Color grading (#31): exposure (EV stops), contrast, saturation, temperature (-1 cool..+1 warm),
 // tint (-1 green..+1 magenta). Single pass, folded into the post uber-pass.
+// Anti-aliasing: FXAA 3.11 (console variant) in the post pass on the LDR picture — nine taps, no history, the cheap
+// edge smoothing until temporal AA (#141). Persistent renderer state like the other post effects.
+EDITOR_INTERFACE void SetPostFxAntiAlias(bool enabled)
+{
+	graphics::Renderer::instance().postfx().params().fxaa = enabled;
+}
+
 EDITOR_INTERFACE void SetPostFxColorGrade(bool enabled, float exposure, float contrast, float saturation,
 	float temperature, float tint)
 {

@@ -453,7 +453,7 @@ namespace vortex::graphics::dx12
 
 		// The enabled pass list, in chain order. Each entry is a CB slot; all share the uber-PSO.
 		u32 passes[MAX_PASSES]; u32 n = 0;
-		if (m_params.vignette || m_params.grain || m_params.ca || m_params.grade || bloom_on) passes[n++] = 0;
+		if (m_params.vignette || m_params.grain || m_params.ca || m_params.grade || m_params.fxaa || bloom_on) passes[n++] = 0;
 		if (m_params.debug_invert) passes[n++] = 1;
 		if (n == 0) return;   // renderer gates on active(), but stay safe against a mid-frame toggle
 
@@ -464,7 +464,7 @@ namespace vortex::graphics::dx12
 			cb.texel[1] = 1.0f / (float)h;
 			cb.time = time_seconds;
 			cb.flags = (m_params.vignette ? 1u : 0u) | (m_params.grain ? 2u : 0u) | (m_params.ca ? 4u : 0u)
-				| (m_params.grade ? 16u : 0u) | (bloom_on ? 32u : 0u);
+				| (m_params.grade ? 16u : 0u) | (bloom_on ? 32u : 0u) | (m_params.fxaa ? 64u : 0u);
 			cb.vignette[0] = m_params.vig_intensity;
 			cb.vignette[1] = m_params.vig_smoothness;
 			cb.vignette[2] = m_params.vig_roundness;

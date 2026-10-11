@@ -86,6 +86,7 @@ namespace vortex::graphics::sdlgpu
 			bool ca{ false };
 			float ca_strength{ 0.35f }, ca_falloff{ 1.2f };
 			bool grade{ false };
+			bool fxaa{ false };   // FXAA on the LDR picture
 			float exposure{ 0.0f }, contrast{ 1.0f }, saturation{ 1.0f }, temperature{ 0.0f }, tint{ 0.0f };
 			bool bloom{ false };
 			float bloom_threshold{ 0.75f }, bloom_knee{ 0.5f }, bloom_intensity{ 0.7f }, bloom_scatter{ 0.65f };
@@ -94,7 +95,7 @@ namespace vortex::graphics::sdlgpu
 		Params& params() { return m_params; }
 		const Params& params() const { return m_params; }
 		bool bloom_requested() const { return m_params.bloom; }
-		bool active() const { return m_params.vignette || m_params.grain || m_params.ca || m_params.grade || m_params.debug_invert || m_params.bloom; }
+		bool active() const { return m_params.vignette || m_params.grain || m_params.ca || m_params.grade || m_params.fxaa || m_params.debug_invert || m_params.bloom; }
 		void set_main_view_enabled(bool enabled) { m_main_view = enabled; }
 		bool main_view_enabled() const { return m_main_view; }
 	private:

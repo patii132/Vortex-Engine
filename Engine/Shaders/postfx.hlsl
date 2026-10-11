@@ -9,7 +9,7 @@ cbuffer PostFx : register(b0)
 {
     float2 TexelSize;      // 1 / output size
     float  Time;           // seconds since renderer start (grain re-seed)
-    uint   Flags;          // 1 vignette, 2 grain, 4 chromatic aberration, 8 invert, 16 color grading, 32 bloom
+    uint   Flags;          // 1 vignette, 2 grain, 4 chromatic aberration, 8 invert, 16 color grading, 32 bloom, 64 FXAA
     float4 Vignette;       // x intensity, y smoothness, z roundness (1 = circular), w unused
     float4 VignetteColor;  // rgb linear, w unused
     float4 GrainCA;        // x grain intensity, y grain size (px), z CA strength, w CA radial falloff
@@ -47,6 +47,31 @@ float Hash21(float2 p)
     return frac(p.x * p.y);
 }
 
+// FXAA 3.11 (the console variant): the luma of the 3x3 neighbourhood picks the edge direction, two taps along it blend the
+// edge, two wider taps are kept only while they stay inside the local luma range — nine samples, no history.
+float FxaaLuma(float3 c) { return dot(c, float3(0.299, 0.587, 0.114)); }
+float3 Fxaa(float2 uv)
+{
+    float3 rgbM = Src.Sample(Smp, uv).rgb;
+    float3 rgbNW = Src.Sample(Smp, uv + float2(-1.0, -1.0) * TexelSize).rgb;
+    float3 rgbNE = Src.Sample(Smp, uv + float2(1.0, -1.0) * TexelSize).rgb;
+    float3 rgbSW = Src.Sample(Smp, uv + float2(-1.0, 1.0) * TexelSize).rgb;
+    float3 rgbSE = Src.Sample(Smp, uv + float2(1.0, 1.0) * TexelSize).rgb;
+    float lumaM = FxaaLuma(rgbM), lumaNW = FxaaLuma(rgbNW), lumaNE = FxaaLuma(rgbNE), lumaSW = FxaaLuma(rgbSW), lumaSE = FxaaLuma(rgbSE);
+    float lumaMin = min(lumaM, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
+    float lumaMax = max(lumaM, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
+    float2 dir;
+    dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
+    dir.y = ((lumaNW + lumaSW) - (lumaNE + lumaSE));
+    float dirReduce = max((lumaNW + lumaNE + lumaSW + lumaSE) * (0.25 * (1.0 / 8.0)), 1.0 / 128.0);
+    float rcpDirMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);
+    dir = min(float2(8.0, 8.0), max(float2(-8.0, -8.0), dir * rcpDirMin)) * TexelSize;
+    float3 rgbA = 0.5 * (Src.Sample(Smp, uv + dir * (1.0 / 3.0 - 0.5)).rgb + Src.Sample(Smp, uv + dir * (2.0 / 3.0 - 0.5)).rgb);
+    float3 rgbB = rgbA * 0.5 + 0.25 * (Src.Sample(Smp, uv + dir * -0.5).rgb + Src.Sample(Smp, uv + dir * 0.5).rgb);
+    float lumaB = FxaaLuma(rgbB);
+    return (lumaB < lumaMin || lumaB > lumaMax) ? rgbA : rgbB;
+}
+
 float4 PSMain(VS_OUT i) : SV_TARGET
 {
     float2 uv = i.uv;
@@ -62,6 +87,10 @@ float4 PSMain(VS_OUT i) : SV_TARGET
         col.r = Src.Sample(Smp, uv + fromC * amt).r;
         col.g = Src.Sample(Smp, uv).g;
         col.b = Src.Sample(Smp, uv - fromC * amt).b;
+    }
+    else if (Flags & 64)
+    {
+        col = Fxaa(uv);   // anti-aliasing on the LDR picture (before bloom / grain / grading)
     }
     else
     {

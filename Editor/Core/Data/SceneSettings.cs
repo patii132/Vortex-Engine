@@ -82,6 +82,13 @@ namespace Editor.Core.Data
         /// <summary>0 = the ACES fit (the classic look; bright saturated colours drift towards white), 1 = Khronos PBR Neutral
         /// (hue-preserving — a sunlit desert stays orange, a red car red).</summary>
         [DataMember(Name = "tonemapper", Order = 84)] public int Tonemapper { get; set; }
+        /// <summary>FXAA on the final picture (nine taps, no history): smooth edges on fronds, grass and ripples. Off = the picture as rendered.</summary>
+        [DataMember(Name = "aaOn", Order = 85)] public bool AntiAliasEnabled { get; set; }
+        // ---- Ground bounce: the sun's light bounced off the ground into the shadows (a warm lower hemisphere in the sky light) ----
+        [DataMember(Name = "bounceStrength", Order = 86)] public float BounceStrength { get; set; }
+        [DataMember(Name = "bounceR", Order = 87)] public float BounceR { get; set; } = 0.55f;
+        [DataMember(Name = "bounceG", Order = 88)] public float BounceG { get; set; } = 0.40f;
+        [DataMember(Name = "bounceB", Order = 89)] public float BounceB { get; set; } = 0.26f;
 
         /// <summary>DataContractSerializer builds an UNINITIALIZED object (field initializers never
         /// run), so members missing from an older .vscene would deserialize as 0 — a scene saved
@@ -91,6 +98,7 @@ namespace Editor.Core.Data
         private void RestoreDefaults(StreamingContext context)
         {
             FogDensity = 0.08f; FogR = 0.02f; FogG = 0.025f; FogB = 0.035f;
+            BounceR = 0.55f; BounceG = 0.40f; BounceB = 0.26f;
             VignetteIntensity = 0.8f; VignetteSmoothness = 0.5f; VignetteRoundness = 1.0f;
             GrainIntensity = 0.35f; GrainSize = 1.6f;
             CaStrength = 0.35f; CaFalloff = 1.2f;
@@ -108,6 +116,7 @@ namespace Editor.Core.Data
                 FogHeightY, FogHeightFalloff);
             DllWrapper.VortexAPI.SetSceneExposureStops(SceneExposure);
             DllWrapper.VortexAPI.SetTonemapperMode(Tonemapper);
+            DllWrapper.VortexAPI.SetPostAntiAlias(AntiAliasEnabled);
             DllWrapper.VortexAPI.SetFogSunGlowStrength(FogEnabled ? FogSunGlow : 0f);
             DllWrapper.VortexAPI.SetPostVignette(VignetteEnabled, VignetteIntensity, VignetteSmoothness,
                 VignetteRoundness, VignetteR, VignetteG, VignetteB);

@@ -53,6 +53,10 @@ namespace VortexEditor.Panels
             Sections.Children.Add(Section("Exposure", "The camera's aperture: scene exposure in stops BEFORE the tonemapper. +1 doubles the light the ACES curve receives — brightens a sunlit world without the clipping of the grading exposure. 0 = the classic look.", null, null,
                 Slider("Stops", "−3 … +4 stops; a sunlit desert wants +1.5 … +2.5, a night scene −1", -3, 4, s => s.SceneExposure, (s, v) => s.SceneExposure = v),
                 Choice("Tonemapper", "ACES: the classic filmic curve — bright saturated colours drift towards white. PBR Neutral (Khronos): keeps hue and saturation, a sunlit desert stays orange.", new[] { "ACES", "PBR Neutral" }, s => s.Tonemapper, (s, v) => s.Tonemapper = v)));
+            Sections.Children.Add(Section("Anti-aliasing", "FXAA on the final picture: smooth edges on fronds, grass and ripples (nine taps, no history, ~0.3 ms). Temporal AA comes with the AAA rendering milestone.", s => s.AntiAliasEnabled, (s, v) => s.AntiAliasEnabled = v));
+            Sections.Children.Add(Section("Ground Bounce", "The sun's light bounced off the ground into the shadows: a warm lower hemisphere added to the sky light, scaled by the sun's strength and height. 0 = off; a desert noon wants 0.4–0.7.", null, null,
+                Slider("Strength", null, 0, 1.5, s => s.BounceStrength, (s, v) => s.BounceStrength = v),
+                ColorRow("Ground", s => (s.BounceR, s.BounceG, s.BounceB), (s, c) => { s.BounceR = c.r; s.BounceG = c.g; s.BounceB = c.b; })));
             Sections.Children.Add(Section("Fog", "Height fog: distance haze plus an optional ground mist below Height Y.", s => s.FogEnabled, (s, v) => s.FogEnabled = v,
                 Slider("Density", null, 0, 0.5, s => s.FogDensity, (s, v) => s.FogDensity = v),
                 Slider("Height Y", null, -20, 20, s => s.FogHeightY, (s, v) => s.FogHeightY = v),
