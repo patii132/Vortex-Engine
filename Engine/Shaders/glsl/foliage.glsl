@@ -78,6 +78,7 @@ layout(set = 2, binding = 6) uniform sampler2DShadow u_spot_shadow;
 layout(set = 2, binding = 7) uniform sampler2DShadow u_csm_shadow;
 layout(set = 2, binding = 8) uniform sampler2DShadow u_point_shadow;
 layout(set = 2, binding = 9) uniform sampler2D       u_ssao;
+layout(set = 2, binding = 10) uniform sampler2D      u_env;    // the sky as a reflection (IBL step 2)
 
 // ---------------------------------------------------------------- BRDF
 float d_ggx(float NdotH, float roughness)
@@ -255,6 +256,25 @@ vec3 sky_irradiance(vec3 n)
 	return max(e, vec3(0.0));
 }
 
+// The sky as a reflection (IBL step 2): an equirect of the sky with mips at binding 10, env_sky.w = 2 while bound,
+// env_horizon.w = its mip count; the baker's 8-bit soft compression (straight below 1, x / (1 + x) above) undone here.
+vec2 env_uv(vec3 d)
+{
+	return vec2(atan(d.x, d.z) / (2.0 * 3.14159265) + 0.5, acos(clamp(d.y, -1.0, 1.0)) / 3.14159265);
+}
+vec3 decode_env(vec3 c)
+{
+	vec3 lo = c / 0.75;
+	vec3 t = clamp((c - 0.75) / 0.25, 0.0, 1.0);
+	vec3 hi = 1.0 / max(1.0 - t, vec3(0.0625));
+	return (c.x <= 0.75 && c.y <= 0.75 && c.z <= 0.75) ? lo : max(lo, hi);
+}
+vec3 sample_env(vec3 R, float roughness, float mips)
+{
+	float lod = clamp(roughness, 0.0, 1.0) * max(mips - 1.0, 0.0);
+	return decode_env(textureLod(u_env, env_uv(R), lod).rgb);
+}
+
 void main()
 {
 	vec2 uv = v_uv;   // the wind lives in uv_tiling: no texture tiling
@@ -416,7 +436,11 @@ void main()
 
 	vec3 R = reflect(-V, N);
 	vec3 env_color;
-	if (frame.env_sky.w > 0.5)
+	if (frame.env_sky.w > 1.5)
+	{
+		env_color = sample_env(R, roughness, frame.env_horizon.w) * frame.ambient_strength;   // the real sky, blurred by roughness
+	}
+	else if (frame.env_sky.w > 0.5)
 	{
 		// Reflections of the scene's own sky gradient (zenith / horizon / ground), blurred toward its average
 		// with roughness — metals (weapons!) pick up the sky instead of turning black. Scaled like the

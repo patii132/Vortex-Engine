@@ -84,6 +84,7 @@ cbuffer LightBuffer : register(b2)
 };
 
 Texture2D CsmShadowMap     : register(t8);
+Texture2D EnvMap           : register(t11);   // the sky as a reflection (IBL step 2)
 SamplerComparisonState ShadowSampler : register(s1);
 
 float FogOpticalDepth(float density, float heightY, float k, float3 cam, float3 worldPos)
@@ -198,6 +199,25 @@ float Noise2(float2 p)
     return lerp(lerp(Hash2(i), Hash2(i + float2(1, 0)), f.x), lerp(Hash2(i + float2(0, 1)), Hash2(i + float2(1, 1)), f.x), f.y);
 }
 
+// The sky as a reflection (IBL step 2): an equirect of the sky with mips at t11, EnvSky.w = 2 while bound, EnvHorizon.w =
+// its mip count. Radiance was soft-compressed into 8 bits by the baker (straight below 1, x / (1 + x) above) — undone here.
+float2 EnvUV(float3 d)
+{
+    return float2(atan2(d.x, d.z) / (2.0 * 3.14159265) + 0.5, acos(clamp(d.y, -1.0, 1.0)) / 3.14159265);
+}
+float3 DecodeEnv(float3 c)
+{
+    float3 lo = c / 0.75;
+    float3 t = saturate((c - 0.75) / 0.25);
+    float3 hi = 1.0 / max(1.0 - t, 0.0625);
+    return c.x <= 0.75 && c.y <= 0.75 && c.z <= 0.75 ? lo : max(lo, hi);
+}
+float3 SampleEnv(float3 R, float roughness, float lodMin)
+{
+    float lod = max(saturate(roughness) * max(EnvHorizon.w - 1.0, 0.0), lodMin);
+    return DecodeEnv(EnvMap.SampleLevel(LinearSampler, EnvUV(R), lod).rgb);
+}
+
 float4 PSMain(PS_IN input) : SV_TARGET
 {
     float depth = max(input.uv.x, 0.0);
@@ -233,7 +253,14 @@ float4 PSMain(PS_IN input) : SV_TARGET
     // the sky in the surface
     float3 R = reflect(-V, N);
     float3 skyRefl;
-    if (EnvSky.w > 0.5)
+    if (EnvSky.w > 1.5)
+    {
+        // the real sky in the water: never below the horizon (the picture's ground is not the lake's surroundings), and
+        // blurred with distance — far away the per-pixel ripple slopes would only turn the sky's sharp horizon into stripes
+        float lodMin = 4.0 * saturate((camDist - 40.0) / 160.0);
+        skyRefl = SampleEnv(float3(R.x, max(R.y, 0.02), R.z), rough, lodMin);
+    }
+    else if (EnvSky.w > 0.5)
         skyRefl = R.y >= 0.0 ? lerp(EnvHorizon.rgb, EnvSky.rgb, pow(saturate(R.y), 0.5)) : lerp(EnvHorizon.rgb, EnvGround.rgb, pow(saturate(-R.y), 0.6));
     else
         skyRefl = lerp(horizon, skyColor, saturate(R.y)) * 0.8;

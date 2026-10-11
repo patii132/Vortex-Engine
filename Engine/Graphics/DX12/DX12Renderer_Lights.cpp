@@ -39,8 +39,9 @@ namespace vortex::graphics::dx12
 	m_frame_constants.ssao_enabled = (m_ssao_enabled && m_ssao_pso) ? 1.0f : 0.0f;
 	{
 		const float env_on = (m_skybox_enabled && (m_skybox_mode == SkyboxMode::Gradient || m_skybox_mode == SkyboxMode::Texture)) ? 1.0f : 0.0f;
-		m_frame_constants.env_sky = XMFLOAT4(m_env_sky.x, m_env_sky.y, m_env_sky.z, env_on);
-		m_frame_constants.env_horizon = XMFLOAT4(m_env_horizon.x, m_env_horizon.y, m_env_horizon.z, 0.0f);
+		const bool env_map = env_on > 0.5f && m_env_map != id::invalid_id && m_env_mips > 0;
+		m_frame_constants.env_sky = XMFLOAT4(m_env_sky.x, m_env_sky.y, m_env_sky.z, env_map ? 2.0f : env_on);   // 2 = a reflection map is bound at t11
+		m_frame_constants.env_horizon = XMFLOAT4(m_env_horizon.x, m_env_horizon.y, m_env_horizon.z, env_map ? (float)m_env_mips : 0.0f);
 		m_frame_constants.env_ground = XMFLOAT4(m_env_ground.x, m_env_ground.y, m_env_ground.z, 0.0f);
 	}
 

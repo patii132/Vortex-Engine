@@ -477,7 +477,7 @@ namespace vortex::graphics::sdlgpu
 	{
 		m_vs_standard = create_shader("standard", "VSMain", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 1);
 		m_vs_skinned = create_shader("standard", "VSSkinned", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 2);
-		m_fs_standard = create_shader("standard", "PSMain", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 0, 3);
+		m_fs_standard = create_shader("standard", "PSMain", SDL_GPU_SHADERSTAGE_FRAGMENT, 11, 0, 3);
 		m_vs_grid = create_shader("grid", "GridVS", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 1);
 		m_fs_grid = create_shader("grid", "GridPS", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 1);
 		m_vs_sky = create_shader("skybox", "SkyVS", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 1);
@@ -1114,7 +1114,7 @@ namespace vortex::graphics::sdlgpu
 		{
 			// two vertex uniform buffers: PerFrame (0) and PerObject (1) — custom vertex shaders may read the material (#125)
 			SDL_GPUShader* vs = skinned ? m_vs_skinned : create_shader_from_code(vs_code, "VSMain", path, SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 2);
-			SDL_GPUShader* fs = create_shader_from_code(fs_code, "PSMain", path, SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 0, 3);
+			SDL_GPUShader* fs = create_shader_from_code(fs_code, "PSMain", path, SDL_GPU_SHADERSTAGE_FRAGMENT, 11, 0, 3);
 			if (vs && fs)
 			{
 				wait_idle();
@@ -1231,7 +1231,7 @@ namespace vortex::graphics::sdlgpu
 		std::string vs_text = cap.text;
 		cap.text.clear();
 		SDL_ClearError();
-		SDL_GPUShader* fs = create_shader_from_code(fs_code, "PSMain", path, SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 0, 3);
+		SDL_GPUShader* fs = create_shader_from_code(fs_code, "PSMain", path, SDL_GPU_SHADERSTAGE_FRAGMENT, 11, 0, 3);
 		// Metal compiles the whole source for each stage: report the same diagnostics once
 		if (!fs) errors += (!vs && cap.text == vs_text) ? std::string("PSMain: the same errors\n") : "PSMain: " + stage_error(cap) + "\n";
 		cap.text.clear();

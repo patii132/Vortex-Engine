@@ -139,6 +139,77 @@ namespace Editor.Core.Services
             };
         }
 
+        // ---------------------------------------------------------------- the reflection map
+
+        /// <summary>The sky as a reflection: a linear 8-bit RGBA equirect (width × width/2) of the picture or gradient,
+        /// radiance soft-compressed into 0..1 (x / (1 + x) above 1 — the sun's glitter is the directional light's job), ready
+        /// for a texture with a mip chain that the shaders sample by roughness. Cached by the same key as the irradiance.</summary>
+        public sealed class ReflectionMap
+        {
+            public byte[] Rgba; public int Width, Height; public string Key;
+        }
+
+        private static readonly Dictionary<string, ReflectionMap> _maps = new Dictionary<string, ReflectionMap>();
+
+        public static ReflectionMap ReflectionFromTexture(string fullPath, float exposure, int width = 512)
+        {
+            string key = "rtex|" + fullPath + "|" + (File.Exists(fullPath) ? File.GetLastWriteTimeUtc(fullPath).Ticks : 0) + "|" + exposure.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) + "|" + width;
+            ReflectionMap m;
+            if (_maps.TryGetValue(key, out m)) return m;
+            float[] rgb; int w, h;
+            if (!LoadEquirect(fullPath, out rgb, out w, out h)) return null;
+            m = Encode(rgb, w, h, exposure, width); m.Key = key; _maps[key] = m;
+            return m;
+        }
+
+        public static ReflectionMap ReflectionFromGradient(float tr, float tg, float tb, float hr, float hg, float hb, float br, float bg, float bb, int width = 128)
+        {
+            string key = "rgrad|" + new[] { tr, tg, tb, hr, hg, hb, br, bg, bb }.Select3() + "|" + width;
+            ReflectionMap m;
+            if (_maps.TryGetValue(key, out m)) return m;
+            int w = width, h = width / 2;
+            var rgb = new float[w * h * 3];
+            for (int y = 0; y < h; y++)
+            {
+                float dy = 1f - 2f * (y + 0.5f) / h; float r, g, b;
+                if (dy >= 0f) { float t = (float)Math.Pow(dy, 0.6); r = hr + (tr - hr) * t; g = hg + (tg - hg) * t; b = hb + (tb - hb) * t; }
+                else { float t = (float)Math.Pow(-dy, 0.6); r = hr + (br - hr) * t; g = hg + (bg - hg) * t; b = hb + (bb - hb) * t; }
+                for (int x = 0; x < w; x++) { int o = (y * w + x) * 3; rgb[o] = r; rgb[o + 1] = g; rgb[o + 2] = b; }
+            }
+            m = Encode(rgb, w, h, 1f, width); m.Key = key; _maps[key] = m;
+            return m;
+        }
+
+        private static ReflectionMap Encode(float[] rgb, int w, int h, float exposure, int width)
+        {
+            int dw = Math.Min(w, width), dh = Math.Max(1, dw / 2);
+            var m = new ReflectionMap { Width = dw, Height = dh, Rgba = new byte[dw * dh * 4] };
+            int bx = Math.Max(1, w / dw), by = Math.Max(1, h / dh);
+            for (int y = 0; y < dh; y++)
+                for (int x = 0; x < dw; x++)
+                {
+                    float r = 0, g = 0, b = 0; int n = 0;
+                    for (int yy = 0; yy < by; yy++)
+                        for (int xx = 0; xx < bx; xx++)
+                        {
+                            int sx = Math.Min(w - 1, x * bx + xx), sy = Math.Min(h - 1, y * by + yy);
+                            int o = (sy * w + sx) * 3; r += rgb[o]; g += rgb[o + 1]; b += rgb[o + 2]; n++;
+                        }
+                    r = r / n * exposure; g = g / n * exposure; b = b / n * exposure;
+                    int d = (y * dw + x) * 4;
+                    m.Rgba[d] = Compress(r); m.Rgba[d + 1] = Compress(g); m.Rgba[d + 2] = Compress(b); m.Rgba[d + 3] = 255;
+                }
+            return m;
+        }
+
+        // linear radiance -> 8 bits: straight below 1, x / (1 + x) rescaled above (the shaders read it back as linear-ish)
+        private static byte Compress(float v)
+        {
+            if (v < 0f) v = 0f;
+            float c = v <= 1f ? v * 0.75f : 0.75f + 0.25f * ((v - 1f) / (v));
+            return (byte)Math.Round(Math.Min(1f, c) * 255f);
+        }
+
         // ---------------------------------------------------------------- pictures
 
         /// <summary>A linear RGB equirect from a Radiance .hdr (RGBE, RLE) or, for other formats, from the 8-bit decode (sRGB → linear).</summary>

@@ -101,5 +101,12 @@ namespace vortex::graphics::dx12
 		m_skybox_pipeline.set_sun(direction, color, intensity);
 	}
 
-
+	// The sky as a reflection (IBL step 2): the bound equirect's SRV, or a null handle while none is set / loaded.
+	D3D12_GPU_DESCRIPTOR_HANDLE DX12Renderer::env_map_srv() const
+	{
+		if (m_env_map == id::invalid_id) return {};
+		Texture* tex = ResourceRegistry::instance().get_texture(m_env_map);
+		if (!tex || !tex->is_valid()) return {};
+		return tex->srv_gpu();
+	}
 }

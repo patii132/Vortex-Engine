@@ -1101,6 +1101,15 @@ namespace Editor.DllWrapper
             try { SetSkyboxMode((uint)mode); } catch { }
         }
 
+        [DllImport(_dllName, CallingConvention = _cc, EntryPoint = "SetEnvironmentMap")]
+        private static extern void SetEnvironmentMapNative(long textureId, int mipCount);
+
+        /// <summary>The sky as a reflection (IBL step 2): a registry equirect with mips the PBR shaders sample by roughness and the water for its sky; -1 = off.</summary>
+        public static void ApplyEnvironmentMap(long textureId, int mipCount)
+        {
+            try { SetEnvironmentMapNative(textureId, mipCount); } catch { }
+        }
+
         [DllImport(_dllName, CallingConvention = _cc, EntryPoint = "SetSkyLight")]
         private static extern void SetSkyLightNative(float[] sh27, int enabled);
 
