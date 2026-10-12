@@ -586,6 +586,65 @@ namespace VortexEditor.Shell
         public static GameEntity CreateReverbZone(Scene scene = null) => RunVm(scene, Vm.CreateReverbZoneCommand);
         public static GameEntity CreateDecal(Scene scene = null) => RunVm(scene, Vm.CreateDecalCommand);
         public static GameEntity CreateTerrain(Scene scene = null) => RunVm(scene, Vm.CreateTerrainCommand);
+
+        /// <summary>Create ▸ Terrain from Heightmap…: a terrain shaped by a picture (PNG 8 / 16 bit or RAW 16) — size and the
+        /// height range come from one prompt ("512, 0, 60" = 512 m across, black at 0 m, white at 60 m); the resolution follows
+        /// the picture (one sample per pixel up to 2049). The terrain's corner lands so the picture is centred in front of the camera.</summary>
+        public static async Task CreateTerrainFromHeightmap()
+        {
+            var top = ActiveWindow();
+            var scene = ActiveScene;
+            if (top == null || scene == null) { Toast("Open a project first"); return; }
+            try
+            {
+                var files = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+                {
+                    Title = "Terrain from heightmap",
+                    AllowMultiple = false,
+                    FileTypeFilter = new[] { new FilePickerFileType("Heightmap (PNG, RAW 16)") { Patterns = new[] { "*.png", "*.raw", "*.r16" } } }
+                });
+                string path = files != null && files.Count > 0 ? files[0].TryGetLocalPath() : null;
+                if (string.IsNullOrEmpty(path)) return;
+                var img = Editor.Core.Terrain.HeightmapIO.Load(path);
+                int res = Terrain.SnapResolution(Math.Max(img.Width, img.Height));
+                string answer = await Dialogs.Prompt("Terrain from heightmap", Path.GetFileName(path) + " (" + img.Width + " × " + img.Height + ", " + img.BitDepth + " bit) → " + res + " samples per side.\nSize in metres, lowest height, highest height:", (res - 1).ToString() + ", 0, 60", "Create", top);
+                if (string.IsNullOrWhiteSpace(answer)) return;
+                var parts = answer.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                float size = res - 1, low = 0f, high = 60f;
+                if (parts.Length > 0 && !PropertyRowsTryParse(parts[0], out size)) { Toast("Size: a number of metres"); return; }
+                if (parts.Length > 1) PropertyRowsTryParse(parts[1], out low);
+                if (parts.Length > 2) PropertyRowsTryParse(parts[2], out high);
+                size = Math.Max(1f, Math.Min(16384f, size));
+                if (high - low < 0.001f) high = low + 1f;
+                // centred ahead of the editor camera, on the ground height 0
+                var cam = Editor.Core.Viewport.EditorViewportSession.Main?.Camera;
+                float cx = 0f, cz = 0f;
+                if (cam != null)
+                {
+                    double yr = cam.Yaw * Math.PI / 180.0;
+                    cx = cam.PositionX + (float)Math.Sin(yr) * size * 0.5f; cz = cam.PositionZ + (float)Math.Cos(yr) * size * 0.5f;
+                }
+                var e = new GameEntity(scene, Path.GetFileNameWithoutExtension(path));
+                var t = new Terrain(e) { Size = size, Resolution = res };
+                e.AddComponent(t);
+                if (e.Transform != null) e.Transform.LocalPosition = new Editor.ECS.Vector3(cx - size * 0.5f, 0f, cz - size * 0.5f);
+                scene.AddEntity(e);
+                Editor.Core.Terrain.TerrainData data; float cell;
+                if (Editor.Core.Services.Terrain.TerrainService.TryGetData(e, out data, out cell))
+                {
+                    Editor.Core.Terrain.HeightmapIO.Apply(data, img, low, high);
+                    Editor.Core.Services.Terrain.TerrainService.MarkDirty(e, new Editor.Core.Terrain.SampleRect { X0 = 0, Z0 = 0, X1 = res - 1, Z1 = res - 1 }, true, false);
+                    Editor.Core.Services.Terrain.TerrainService.Save(e);
+                }
+                SelectionService.Instance.SelectedEntity = e;
+                SelectionService.Instance.RequestFocus(e);
+                Editor.Core.Viewport.EditorViewportSession.RequestResubmit();
+                Toast("Terrain \"" + e.Name + "\" from " + Path.GetFileName(path) + ": " + size.ToString("0") + " m, " + res + "² samples, " + low.ToString("0.#") + " … " + high.ToString("0.#") + " m");
+            }
+            catch (Exception ex) { Fail("Terrain from heightmap", ex); }
+        }
+
+        private static bool PropertyRowsTryParse(string s, out float v) => float.TryParse(s.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v);
         public static GameEntity CreateFoliage(Scene scene = null) => RunVm(scene, Vm.CreateFoliageCommand);
         public static GameEntity CreateWater(Scene scene = null) => RunVm(scene, Vm.CreateWaterCommand);
         public static GameEntity CreateUI(string kind, Scene scene = null)

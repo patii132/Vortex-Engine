@@ -78,6 +78,7 @@ namespace Editor.Core.Editing
             {
                 try { GameRuntime.MountSceneAssets(scene); } catch { }
                 try { SceneRenderService.Instance.PreloadSceneAssets(scene); } catch { }
+                try { EditorViewState.Restore(scene); } catch { }   // the camera where the scene was saved from
             }
             ConsoleService.Instance.LogSystem("Project opened: " + project.Name);
             ProjectOpened?.Invoke(project);
@@ -130,6 +131,7 @@ namespace Editor.Core.Editing
             Hierarchy.ActivateScene(scene);
             try { GameRuntime.MountSceneAssets(scene); } catch { }
             try { SceneRenderService.Instance.PreloadSceneAssets(scene); } catch { }
+            try { EditorViewState.Restore(scene); } catch { }   // the camera where the scene was saved from
             SceneRenderService.RuntimeDirty = true;
         }
 

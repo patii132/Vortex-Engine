@@ -250,6 +250,7 @@ namespace VortexEditor.Shell
                 Item("Camera", null, () => EditorCommands.CreateCamera()),
                 Item("Decal", null, () => EditorCommands.CreateDecal()),
                 Item("Terrain", null, () => EditorCommands.CreateTerrain()),
+                Item("Terrain from Heightmap…", null, () => _ = EditorCommands.CreateTerrainFromHeightmap()),
                 Item("Foliage", null, () => EditorCommands.CreateFoliage()),
                 Item("Water", null, () => EditorCommands.CreateWater()),
                 Sub("Audio",

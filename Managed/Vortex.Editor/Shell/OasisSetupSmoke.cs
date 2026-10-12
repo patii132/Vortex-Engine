@@ -62,7 +62,13 @@ namespace VortexEditor.Shell
 
             // ---- the Tactical player rig (weapons, HUD, controller) becomes a prefab the oasis instantiates ----
             string rigPrefab = null;
-            var range = project.ActiveScene;
+            // the rig comes from the Range scene (the Tactical template's), never from a previous Oasis: taking the player of
+            // whichever scene was active re-saved an oasis player — with its Footprints script and its weather children — as
+            // the prefab, and every further run added one more of each (19 of everything after 19 runs, 2026-10-12)
+            Scene range = null;
+            foreach (var sc in project.Scenes) if (sc != null && string.Equals(sc.Name, "Range", StringComparison.OrdinalIgnoreCase)) { range = sc; break; }
+            if (range == null) range = project.ActiveScene;
+            if (range != null && !range.IsLoaded) { try { range.Load(); } catch { } }
             var rangePlayer = range == null ? null : TemplateSetupSmoke.Find(range, e => e.Name == "Player" || e.Tag == "Player");
             if (rangePlayer != null)
             {
@@ -198,6 +204,11 @@ namespace VortexEditor.Shell
             {
                 rig.Name = "Player";
                 rig.PrefabPath = null;   // its own entity now, not a linked instance
+                // whatever the prefab brought along from an earlier oasis goes first: one Footprints script, no weather children
+                foreach (var sc in rig.GetComponents<Script>())
+                    if (sc != null && (sc.ScriptPath ?? "").EndsWith("Footprints.cs", StringComparison.OrdinalIgnoreCase)) rig.RemoveComponent(sc);
+                foreach (var ch in new List<GameEntity>(rig.Children))
+                    if (ch != null && (ch.Name == "Weather Haze" || ch.Name == "Weather Sand")) { rig.RemoveChild(ch); scene.RemoveEntity(ch); }
                 rig.AddComponentDirect(new Script(rig, "Assets/Scripts/Player/Footprints.cs"));   // boot prints in the sand
                 // the rig's entity sits at EYE height (CoDMovement: feet = Position.Y - 1.7): 1.2 m put the feet half a metre
                 // under the sand, and with the far dunes' sheet 1.2 m below the oasis the capsule was sandwiched between two

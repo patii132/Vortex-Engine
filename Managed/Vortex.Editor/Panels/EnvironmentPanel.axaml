@@ -9,8 +9,8 @@
       <Border Classes="card" Padding="10,6">
         <DockPanel>
           <ToggleSwitch x:Name="PreviewFx" DockPanel.Dock="Right" OnContent="" OffContent="" IsCheckedChanged="OnPreviewFx"
-                        ToolTip.Tip="Temporarily shows the post effects (vignette, grain, aberration, bloom, grading) in the editor viewport for tuning. Never saved; off by default so map building stays clean."/>
-          <TextBlock Text="Preview post effects in viewport" Classes="label" VerticalAlignment="Center"/>
+                        ToolTip.Tip="The scene's post effects (colour grade, bloom, FXAA, vignette, grain, aberration) in the editor viewport — while building and while playing in it. Kept as an editor preference, on by default; off saves a few milliseconds per frame. The standalone player and the game window always apply them."/>
+          <TextBlock Text="Post effects in viewport (FX)" Classes="label" VerticalAlignment="Center"/>
         </DockPanel>
       </Border>
       <StackPanel x:Name="Sections" Spacing="8"/>

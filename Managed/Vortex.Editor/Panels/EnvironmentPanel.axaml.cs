@@ -27,22 +27,32 @@ namespace VortexEditor.Panels
         private static Scene ActiveScene => ProjectData.Current?.ActiveScene;
         private static SceneSettings Settings => ActiveScene?.Settings;
 
-        // ---- "Preview post effects in viewport" (editor-only, never saved) — shared with the viewport's view options
-        private static bool _previewFx;
-        private static event Action PreviewChanged;
+        // ---- "Post effects in viewport": the scene's grade, bloom, FXAA, vignette, grain and aberration in the editor's own
+        // viewport, while building AND while playing in it (one switch, kept as an editor preference, on by default so the
+        // viewport shows what the game shows; off for a faster frame). The standalone player and the game window always apply
+        // them (PlayerHost). Shared by the viewport toolbar's FX button, the view-options menu and this panel's switch.
+        private static bool _previewFx = EditorPreferences.Current.PostEffectsInViewport;
+        internal static event Action PreviewChanged;
         public static bool PreviewPostEffects => _previewFx;
         public static void SetPreviewPostEffects(bool on)
         {
             _previewFx = on;
-            try { VortexAPI.SetPostMainView(on); } catch { }
+            ApplyPreviewPostEffects();
+            try { var p = EditorPreferences.Current; if (p.PostEffectsInViewport != on) { p.PostEffectsInViewport = on; p.Save(); } } catch { }
             PreviewChanged?.Invoke();
+        }
+        /// <summary>Push the preference into the renderer (at start-up and whenever a project opens: the engine comes up with
+        /// the flag off, as the player's clean default).</summary>
+        public static void ApplyPreviewPostEffects()
+        {
+            try { VortexAPI.SetPostMainView(_previewFx); } catch { }
         }
 
         public EnvironmentPanel()
         {
             InitializeComponent();
             Build();
-            EditorSession.Instance.ProjectOpened += _ => Dispatcher.UIThread.Post(Refresh);
+            EditorSession.Instance.ProjectOpened += _ => Dispatcher.UIThread.Post(() => { ApplyPreviewPostEffects(); Refresh(); });
             EditorSession.Instance.ProjectClosed += () => Dispatcher.UIThread.Post(Refresh);
             AttachedToVisualTree += (s, e) => Refresh();
             PreviewChanged += () => Dispatcher.UIThread.Post(() => { _loading = true; PreviewFx.IsChecked = _previewFx; _loading = false; });

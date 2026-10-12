@@ -93,6 +93,14 @@ namespace Editor.Core.Data
         [DataMember(Name = "giOn", Order = 90)] public bool GiEnabled { get; set; }
         [DataMember(Name = "giStrength", Order = 91)] public float GiStrength { get; set; } = 1.0f;
         [DataMember(Name = "giRadius", Order = 92)] public float GiRadius { get; set; } = 2.5f;
+        // ---- The editor's view (EditorViewState): where the scene camera stood when the scene was saved — a scene opens there,
+        // Home returns there. Editor data only; a scene saved before this has none (viewSet false) and starts at the classic default. ----
+        [DataMember(Name = "viewSet", Order = 100)] public bool EditorViewSet { get; set; }
+        [DataMember(Name = "viewX", Order = 101)] public float EditorViewX { get; set; }
+        [DataMember(Name = "viewY", Order = 102)] public float EditorViewY { get; set; }
+        [DataMember(Name = "viewZ", Order = 103)] public float EditorViewZ { get; set; }
+        [DataMember(Name = "viewYaw", Order = 104)] public float EditorViewYaw { get; set; }
+        [DataMember(Name = "viewPitch", Order = 105)] public float EditorViewPitch { get; set; }
 
         /// <summary>DataContractSerializer builds an UNINITIALIZED object (field initializers never
         /// run), so members missing from an older .vscene would deserialize as 0 — a scene saved

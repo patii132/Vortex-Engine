@@ -243,6 +243,10 @@ namespace Editor.Core.Viewport
                     _editorFovApplied = RaycastService.EditorFovYDegrees;
                 }
                 if (_playGridHidden) { VortexAPI.ShowGrid(_savedGrid); _playGridHidden = false; }
+                // the grid lies on y = 0: seen from underneath it is a lattice across the sky (a world built below 0, like the
+                // oasis whose floor is at −5 m) — it stays off while the camera is under it and comes back when the camera rises
+                bool gridWanted = EditorViewportService.Instance.IsGridVisible && _camera != null && _camera.PositionY >= -0.01f;
+                if (gridWanted != VortexAPI.IsGridVisible) VortexAPI.ShowGrid(gridWanted);
                 // UI editor preview: lay out + draw the screen through the engine's retained-UI renderer.
                 var preview = PreviewCanvas;
                 if (preview != null && uw > 1 && uh > 1)

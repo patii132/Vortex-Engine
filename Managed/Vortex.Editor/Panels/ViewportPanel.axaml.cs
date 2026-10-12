@@ -86,10 +86,13 @@ namespace VortexEditor.Panels
         }
 
         // ------------------------------------------------------------ toggles
+        private bool _fxHooked;
         private void SyncToggles()
         {
+            if (!_fxHooked) { _fxHooked = true; EnvironmentPanel.PreviewChanged += () => Avalonia.Threading.Dispatcher.UIThread.Post(SyncToggles); }
             _syncing = true;
             var vs = EditorViewportService.Instance;
+            FxToggle.IsChecked = EnvironmentPanel.PreviewPostEffects;
             GridToggle.IsChecked = vs.IsGridVisible;
             SnapToggle.IsChecked = vs.SnapToGrid;
             GizmoToggle.IsChecked = vs.AreGizmosVisible;
@@ -131,6 +134,7 @@ namespace VortexEditor.Panels
         private void OnGridToggle(object s, RoutedEventArgs e) { if (!_syncing) EditorViewportService.Instance.IsGridVisible = GridToggle.IsChecked == true; }
         private void OnSnapToggle(object s, RoutedEventArgs e) { if (!_syncing) EditorCommands.SetSnap(SnapToggle.IsChecked == true); }
         private void OnGizmoToggle(object s, RoutedEventArgs e) { if (!_syncing) EditorViewportService.Instance.AreGizmosVisible = GizmoToggle.IsChecked == true; }
+        private void OnFxToggle(object s, RoutedEventArgs e) { if (!_syncing) EnvironmentPanel.SetPreviewPostEffects(FxToggle.IsChecked == true); }
         private void OnColliderToggle(object s, RoutedEventArgs e) { if (!_syncing) { EditorViewportService.Instance.AreCollidersVisible = ColliderToggle.IsChecked == true; SceneRenderService.RuntimeDirty = true; } }
 
         private void OnColliderPressed(object s, PointerPressedEventArgs e)
@@ -219,7 +223,7 @@ namespace VortexEditor.Panels
             }
             var all = new MenuItem { Header = "Show All Colliders", ToggleType = MenuItemToggleType.CheckBox, IsChecked = EditorViewportService.Instance.ShowAllColliders };
             all.Click += (a, b) => EditorCommands.ToggleAllColliders();
-            var fx = new MenuItem { Header = "Preview Post Effects in Viewport", ToggleType = MenuItemToggleType.CheckBox, IsChecked = EnvironmentPanel.PreviewPostEffects };
+            var fx = new MenuItem { Header = "Post Effects in Viewport (FX)", ToggleType = MenuItemToggleType.CheckBox, IsChecked = EnvironmentPanel.PreviewPostEffects };
             fx.Click += (a, b) => EnvironmentPanel.SetPreviewPostEffects(!EnvironmentPanel.PreviewPostEffects);
             m.Items.Add(phys); m.Items.Add(layers); m.Items.Add(all); m.Items.Add(fx);
             m.ShowAt(ViewOptionsButton);
