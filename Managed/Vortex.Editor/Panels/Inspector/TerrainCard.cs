@@ -32,6 +32,9 @@ namespace VortexEditor.Panels.Inspector
             ComponentEditors.Custom[typeof(Editor.ECS.Components.Rendering.Terrain)] = (c, e) => Rows((Editor.ECS.Components.Rendering.Terrain)c, e);
         }
 
+        /// <summary>The same rows the Inspector shows, for the Terrain Tools window.</summary>
+        internal static IEnumerable<Control> RowsFor(Editor.ECS.Components.Rendering.Terrain t, Editor.ECS.GameEntity entity) => Rows(t, entity);
+
         private static IEnumerable<Control> Rows(Editor.ECS.Components.Rendering.Terrain t, Editor.ECS.GameEntity entity)
         {
             yield return Row("Size", FloatBox(() => t.Size, v => { t.Size = v; Touch(); }, 1, 1f, 16384f, "0.#"), "Edge length in metres (square, from the entity's position along +X / +Z; the entity's scale is ignored)");

@@ -134,6 +134,7 @@ namespace VortexEditor.Panels
         private void OnGridToggle(object s, RoutedEventArgs e) { if (!_syncing) EditorViewportService.Instance.IsGridVisible = GridToggle.IsChecked == true; }
         private void OnSnapToggle(object s, RoutedEventArgs e) { if (!_syncing) EditorCommands.SetSnap(SnapToggle.IsChecked == true); }
         private void OnGizmoToggle(object s, RoutedEventArgs e) { if (!_syncing) EditorViewportService.Instance.AreGizmosVisible = GizmoToggle.IsChecked == true; }
+        private void OnTerrainTools(object s, RoutedEventArgs e) { try { VortexEditor.Shell.EditorWindows.TerrainTools(); } catch (Exception ex) { EditorCommands.Fail("Terrain Tools", ex); } }
         private void OnFxToggle(object s, RoutedEventArgs e) { if (!_syncing) EnvironmentPanel.SetPreviewPostEffects(FxToggle.IsChecked == true); }
         private void OnColliderToggle(object s, RoutedEventArgs e) { if (!_syncing) { EditorViewportService.Instance.AreCollidersVisible = ColliderToggle.IsChecked == true; SceneRenderService.RuntimeDirty = true; } }
 

@@ -119,7 +119,7 @@ namespace VortexEditor.Shell
             var sky = scene.CreateEntity("Sky");
             sky.AddComponentDirect(new Skybox(sky)
             {
-                IsEnabled = true, SkyboxType = SkyboxType.Texture, TexturePath = "Assets/Skies/syferfontein_18d_clear_puresky_2k.hdr", Exposure = 0.4f, AmbientIntensity = 0.45f,
+                IsEnabled = true, SkyboxType = SkyboxType.Texture, TexturePath = "Assets/Skies/syferfontein_18d_clear_puresky_2k.hdr", Exposure = 0.4f, AmbientIntensity = 0.55f,
                 TopColorR = 0.25f, TopColorG = 0.42f, TopColorB = 0.85f,
                 HorizonColorR = 0.95f, HorizonColorG = 0.88f, HorizonColorB = 0.75f,
                 BottomColorR = 0.60f, BottomColorG = 0.50f, BottomColorB = 0.35f

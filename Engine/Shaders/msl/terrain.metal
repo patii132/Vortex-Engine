@@ -397,8 +397,15 @@ static inline float2 sand_ripples(float2 p, float cam_dist, float sand_w)
     float f = fract(phase);
     float slope = f < 0.7 ? 0.35 : -0.82;
     slope *= smoothstep(0.0, 0.06, abs(f - 0.7)) * smoothstep(0.0, 0.04, min(f, 1.0 - f));   // rounded crests and troughs
-    return -slope * 0.16 * patches * fade * aa * wind;
+    return -slope * 0.09 * patches * fade * aa * wind;
 }
+/// The layer's mean colour: one texel of the quadrant two mips above the smallest.
+static inline float3 layer_mean(texture2d<float> tex, sampler smp, int k)
+{
+    float amips = (float)tex.get_num_mip_levels();
+    return srgb_to_linear(tex.sample(smp, float2((float)(k & 1) + 0.5, (float)(k >> 1) + 0.5) * 0.5, level(max(amips - 2.0, 0.0))).rgb);
+}
+
 static inline float macro_variation(float2 world_xz)
 {
     float n = 0.65 * macro_noise(world_xz * 0.025) + 0.35 * macro_noise(world_xz * 0.11 + 7.3);
@@ -479,11 +486,23 @@ fragment float4 PSMain(VSOut in [[stage_in]],
         float2 aM = atlas_uv(uv * 0.23 + float2(0.21, 0.63), i);
         float2 dxM = dx * 0.23, dyM = dy * 0.23;
         clamp_grad(dxM, dyM);
+        // the sharp sample keeps every texel; the 4.3x larger tiling only MODULATES its tone (sampled soft, three mips down)
+        // and adds a little of its slope — averaging the two halved the grain's contrast and made the sand look blurred
         if (obj.has_albedo_texture != 0)
-            albedo += wi * mix(srgb_to_linear(albedo_tex.sample(albedo_smp, a, gradient2d(dx, dy)).rgb), srgb_to_linear(albedo_tex.sample(albedo_smp, aM, gradient2d(dxM, dyM)).rgb), 0.5);
+        {
+            float3 sharp = srgb_to_linear(albedo_tex.sample(albedo_smp, a, gradient2d(dx, dy)).rgb);
+            float3 broad = srgb_to_linear(albedo_tex.sample(albedo_smp, aM, gradient2d(dxM * 8.0, dyM * 8.0)).rgb);
+            float lum_b = dot(broad, float3(0.299, 0.587, 0.114));
+            float lum_m = dot(layer_mean(albedo_tex, albedo_smp, i), float3(0.299, 0.587, 0.114));
+            albedo += wi * sharp * mix(1.0, lum_b / max(lum_m, 0.02), 0.45);
+        }
         else albedo += wi * float3(0.5);
         if (obj.has_normal_texture != 0)
-            nm += wi * mix(decode_n(normal_tex.sample(normal_smp, a, gradient2d(dx, dy)).rgb, obj.has_normal_texture), decode_n(normal_tex.sample(normal_smp, aM, gradient2d(dxM, dyM)).rgb, obj.has_normal_texture), 0.5);
+        {
+            float3 ns = decode_n(normal_tex.sample(normal_smp, a, gradient2d(dx, dy)).rgb, obj.has_normal_texture);
+            float3 nb = decode_n(normal_tex.sample(normal_smp, aM, gradient2d(dxM, dyM)).rgb, obj.has_normal_texture);
+            nm += wi * (ns + float3(nb.xy * 0.35, 0.0));
+        }
         if (obj.has_normal_texture != 0 && detail_w > 0.001)
         {
             float2 ad = atlas_uv(uv * 7.3 + 0.37, i);

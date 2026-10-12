@@ -28,6 +28,10 @@ def main():
     ap.add_argument("--name", default=None)
     ap.add_argument("--fern", action="store_true", help="a fern / cycad clump instead of a palm: fronds from the ground, no crown rings")
     ap.add_argument("--litter", action="store_true", help="one dead frond lying on the ground (the litter under a grove); --fronds = how many in the pile")
+    ap.add_argument("--liana", action="store_true", help="hanging lianas instead of a palm: 3-5 woody strands from a crown point at --height down to the ground with small leaves (atlas frond pieces) along them; --fronds = leaves per strand")
+    ap.add_argument("--bark", help="a bark texture set for the trunk (the diffuse; _nor_dx / _arm siblings are picked up): the trunk gets its own material with u around the trunk and v every --bark-metres up it")
+    ap.add_argument("--bark-metres", type=float, default=2.4, help="metres of trunk one repeat of the bark texture covers")
+    ap.add_argument("--bark-size", type=int, default=2048, help="longest side the bark textures are resized to when copied")
     a = ap.parse_args()
     rnd = random.Random(a.seed)
 
@@ -45,7 +49,7 @@ def main():
         return (math.cos(lean_dir) * a.lean * s, H * t, math.sin(lean_dir) * a.lean * s)
     rings, segs = 14, 14
     ring_idx = []
-    for r in range(0 if a.litter else rings + 1):
+    for r in range(0 if (a.litter or a.liana) else rings + 1):
         t = r / rings
         c = axis(t)
         rad = a.radius * (1.0 - 0.28 * t) * (1.0 + 0.12 * math.sin(t * 9.0 + 1.0))   # a little taper, slight bulges
@@ -55,15 +59,17 @@ def main():
             ang = 2 * math.pi * s / segs
             nx, nz = math.cos(ang), math.sin(ang)
             p = (c[0] + nx * rad, c[1], c[2] + nz * rad)
-            # the bark tiles every 1.6 m along the trunk (u 0..0.5 = the atlas' trunk half)
-            row.append(vertex(p, (nx, 0.0, nz), (0.5 * s / segs, (H * t) / 1.6)))
+            # the bark tiles every 1.6 m along the trunk (u 0..0.5 = the atlas' trunk half); with --bark the whole u range
+            # wraps the trunk once and v repeats every --bark-metres
+            if a.bark: row.append(vertex(p, (nx, 0.0, nz), (s / segs, (H * t) / a.bark_metres)))
+            else: row.append(vertex(p, (nx, 0.0, nz), (0.5 * s / segs, (H * t) / 1.6)))
         ring_idx.append(row)
-    for r in range(0 if a.litter else rings):
+    for r in range(0 if (a.litter or a.liana) else rings):
         for s in range(segs):
             i0, i1, i2, i3 = ring_idx[r][s], ring_idx[r][s + 1], ring_idx[r + 1][s + 1], ring_idx[r + 1][s]
             prims["trunk"] += [i0, i2, i1, i0, i3, i2]
     # caps: a closed tube keeps its end rings under the engine's LOD decimation (an open boundary collapsed and the base floated)
-    for r, ny in (() if a.litter else ((0, -1.0), (rings, 1.0))):
+    for r, ny in (() if (a.litter or a.liana) else ((0, -1.0), (rings, 1.0))):
         c = axis(r / rings)
         centre = vertex((c[0], c[1] - 0.05 if r == 0 else c[1], c[2]), (0.0, ny, 0.0), (0.25, 0.5))
         for s in range(segs):
@@ -150,6 +156,49 @@ def main():
         base = (top[0] + math.cos(yaw) * 0.22, top[1] - 0.6 - rnd.uniform(0.0, 0.5), top[2] + math.sin(yaw) * 0.22)
         frond(base, yaw, -1.25 + rnd.uniform(-0.15, 0.1), 0.25, L * 0.75 * rnd.uniform(0.8, 1.0), W * 0.8, "dead", fold=0.5)
 
+    # ---------------------------------------------------------------- lianas: strands hanging from the crown point
+    if a.liana:
+        strands = rnd.randint(3, 5)
+        for k in range(strands):
+            # the strand's path: from a point near the crown (y = H) down to just above the ground, swinging sideways
+            ang = rnd.uniform(0, 2 * math.pi); spread = rnd.uniform(0.2, 0.9)
+            swing = rnd.uniform(-0.6, 0.6); phase = rnd.uniform(0, math.pi)
+            bottom = rnd.uniform(0.2, 1.8)
+            def path(t, ang=ang, spread=spread, swing=swing, phase=phase, bottom=bottom):
+                y = H - (H - bottom) * t
+                sx = math.cos(ang) * spread * t + math.cos(ang + 1.57) * swing * math.sin(t * 2.6 + phase) * t
+                sz = math.sin(ang) * spread * t + math.sin(ang + 1.57) * swing * math.sin(t * 2.6 + phase) * t
+                return (sx, y, sz)
+            n_seg, n_side = 18, 5
+            rad = rnd.uniform(0.02, 0.045)
+            rings_l = []
+            for i in range(n_seg + 1):
+                t = i / n_seg
+                c = path(t); c2 = path(min(1.0, t + 0.02))
+                d = (c2[0] - c[0], c2[1] - c[1], c2[2] - c[2]); dl = math.sqrt(sum(v * v for v in d)) or 1.0; d = tuple(v / dl for v in d)
+                # a frame around the strand direction
+                up = (0.0, 1.0, 0.0) if abs(d[1]) < 0.9 else (1.0, 0.0, 0.0)
+                u = (d[1] * up[2] - d[2] * up[1], d[2] * up[0] - d[0] * up[2], d[0] * up[1] - d[1] * up[0]); ul = math.sqrt(sum(v * v for v in u)) or 1.0; u = tuple(v / ul for v in u)
+                v = (d[1] * u[2] - d[2] * u[1], d[2] * u[0] - d[0] * u[2], d[0] * u[1] - d[1] * u[0])
+                row = []
+                for sgm in range(n_side + 1):
+                    th = 2 * math.pi * sgm / n_side
+                    nx = (u[0] * math.cos(th) + v[0] * math.sin(th), u[1] * math.cos(th) + v[1] * math.sin(th), u[2] * math.cos(th) + v[2] * math.sin(th))
+                    r_here = rad * (1.0 - 0.5 * t)
+                    pp = (c[0] + nx[0] * r_here, c[1] + nx[1] * r_here, c[2] + nx[2] * r_here)
+                    row.append(vertex(pp, nx, (sgm / n_side, t * (H / 1.2))))
+                rings_l.append(row)
+            for i in range(n_seg):
+                for sgm in range(n_side):
+                    i0, i1, i2, i3 = rings_l[i][sgm], rings_l[i][sgm + 1], rings_l[i + 1][sgm + 1], rings_l[i + 1][sgm]
+                    prims["trunk"] += [i0, i2, i1, i0, i3, i2]
+            # leaves along the strand: small frond pieces (the atlas' frond half, u 0.5..1), hanging outwards and down
+            for j in range(max(0, a.fronds)):
+                t = rnd.uniform(0.08, 0.97)
+                c = path(t)
+                yaw = rnd.uniform(0, 2 * math.pi); L = rnd.uniform(0.35, 0.7); W = rnd.uniform(0.18, 0.3)
+                frond((c[0], c[1], c[2]), yaw, rnd.uniform(-1.3, -0.5), 0.3, L, W, "fronds", fold=0.25)
+
     # ---------------------------------------------------------------- glTF
     out_dir = os.path.dirname(os.path.abspath(a.out)); os.makedirs(out_dir, exist_ok=True)
     base = os.path.splitext(os.path.basename(a.out))[0]
@@ -174,13 +223,43 @@ def main():
     if a.normal and os.path.exists(a.normal):
         Image.open(a.normal).convert("RGB").save(os.path.join(out_dir, base + "_normal.png"), optimize=True)
         images.append({"uri": base + "_normal.png"})
+    bark_idx = {}
+    if a.bark:
+        # the trunk's own textures (a Poly Haven bark: <stem>_diff / _nor_dx / _arm), resized, as JPEG next to the model
+        stem = a.bark
+        for tag in ("_diff_4k", "_diff_2k", "_diff", "_diffuse"):
+            if stem.endswith(tag + ".jpg") or stem.endswith(tag + ".png"): stem = stem[: -len(tag) - 4]; break
+        import glob
+        def sibling(kind):
+            for ext in (".jpg", ".png"):
+                for res in ("_4k", "_2k", "_1k", ""):
+                    c = stem + "_" + kind + res + ext
+                    if os.path.exists(c): return c
+            return None
+        for kind, out_tag, mode in (("diff", "_bark_diffuse", "RGB"), ("nor_dx", "_bark_normal", "RGB"), ("arm", "_bark_arm", "RGB")):
+            src = a.bark if kind == "diff" else sibling(kind)
+            if not src: continue
+            im = Image.open(src).convert(mode)
+            if max(im.size) > a.bark_size:
+                f = a.bark_size / max(im.size); im = im.resize((max(1, round(im.size[0] * f)), max(1, round(im.size[1] * f))), Image.LANCZOS)
+            fn = base + out_tag + ".jpg"
+            im.save(os.path.join(out_dir, fn), quality=90, optimize=True)
+            bark_idx[kind] = len(images); images.append({"uri": fn})
     textures = [{"sampler": 0, "source": i} for i in range(len(images))]
     def mat(nm, tint, cutout):
         m = {"name": nm, "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}, "baseColorFactor": tint, "metallicFactor": 0.0, "roughnessFactor": 0.85}, "doubleSided": True}
-        if len(images) > 1: m["normalTexture"] = {"index": 1}
+        if a.normal and os.path.exists(a.normal): m["normalTexture"] = {"index": 1}
         if cutout: m["alphaMode"] = "MASK"; m["alphaCutoff"] = 0.45
         return m
-    materials = [mat(name + "_trunk", [0.9, 0.86, 0.78, 1.0], False), mat(name + "_fronds", [1.0, 1.0, 1.0, 1.0], True), mat(name + "_dead", [0.62, 0.46, 0.26, 1.0], True)]
+    def bark_mat(nm):
+        if "diff" not in bark_idx: return mat(nm, [0.9, 0.86, 0.78, 1.0], False)
+        m = {"name": nm, "pbrMetallicRoughness": {"baseColorTexture": {"index": bark_idx["diff"]}, "baseColorFactor": [1.0, 1.0, 1.0, 1.0], "metallicFactor": 0.0, "roughnessFactor": 1.0}, "doubleSided": False}
+        if "nor_dx" in bark_idx: m["normalTexture"] = {"index": bark_idx["nor_dx"]}
+        if "arm" in bark_idx:
+            m["occlusionTexture"] = {"index": bark_idx["arm"]}
+            m["pbrMetallicRoughness"]["metallicRoughnessTexture"] = {"index": bark_idx["arm"]}
+        return m
+    materials = [bark_mat(name + "_trunk"), mat(name + "_fronds", [1.0, 1.0, 1.0, 1.0], True), mat(name + "_dead", [0.62, 0.46, 0.26, 1.0], True)]
     off_t = len(pbuf) + len(nbuf) + len(tbuf)
     views = [
         {"buffer": 0, "byteOffset": 0, "byteLength": len(pbuf), "target": 34962},

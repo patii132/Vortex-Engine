@@ -433,8 +433,15 @@ float2 SandRipples(float2 p, float camDist, float sandW)
     float f = frac(phase);
     float slope = f < 0.7 ? 0.35 : -0.82;
     slope *= smoothstep(0.0, 0.06, abs(f - 0.7)) * smoothstep(0.0, 0.04, min(f, 1.0 - f));   // rounded crests and troughs
-    return -slope * 0.16 * patches * fade * aa * wind;
+    return -slope * 0.09 * patches * fade * aa * wind;
 }
+// The layer's mean colour: one texel of the quadrant two mips above the smallest.
+float3 LayerMean(int k)
+{
+    uint w, h, mips; AlbedoTexture.GetDimensions(0, w, h, mips);
+    return SRGBToLinear(AlbedoTexture.SampleLevel(LinearSampler, float2((float)(k & 1) + 0.5, (float)(k >> 1) + 0.5) * 0.5, max((float)mips - 2.0, 0.0)).rgb);
+}
+
 float MacroVariation(float2 worldXZ)
 {
     float n = 0.65 * MacroNoise(worldXZ * 0.025) + 0.35 * MacroNoise(worldXZ * 0.11 + 7.3);
@@ -505,11 +512,23 @@ float4 PSMain(PS_IN input) : SV_TARGET
         float2 aM = AtlasUV(uv * 0.23 + float2(0.21, 0.63), i);
         float2 dxM = dx * 0.23, dyM = dy * 0.23;
         ClampGrad(dxM, dyM);
+        // the sharp sample keeps every texel; the 4.3x larger tiling only MODULATES its tone (sampled soft, three mips down)
+        // and adds a little of its slope — averaging the two halved the grain's contrast and made the sand look blurred
         if (HasAlbedoTexture != 0)
-            albedo += wi * lerp(SRGBToLinear(AlbedoTexture.SampleGrad(LinearSampler, a, dx, dy).rgb), SRGBToLinear(AlbedoTexture.SampleGrad(LinearSampler, aM, dxM, dyM).rgb), 0.5);
+        {
+            float3 sharp = SRGBToLinear(AlbedoTexture.SampleGrad(LinearSampler, a, dx, dy).rgb);
+            float3 broad = SRGBToLinear(AlbedoTexture.SampleGrad(LinearSampler, aM, dxM * 8.0, dyM * 8.0).rgb);
+            float lumB = dot(broad, float3(0.299, 0.587, 0.114));
+            float lumM = dot(LayerMean(i), float3(0.299, 0.587, 0.114));
+            albedo += wi * sharp * lerp(1.0, lumB / max(lumM, 0.02), 0.45);
+        }
         else albedo += wi * float3(0.5, 0.5, 0.5);
         if (HasNormalTexture != 0)
-            nm += wi * lerp(DecodeN(NormalTexture.SampleGrad(LinearSampler, a, dx, dy).rgb), DecodeN(NormalTexture.SampleGrad(LinearSampler, aM, dxM, dyM).rgb), 0.5);
+        {
+            float3 ns = DecodeN(NormalTexture.SampleGrad(LinearSampler, a, dx, dy).rgb);
+            float3 nb = DecodeN(NormalTexture.SampleGrad(LinearSampler, aM, dxM, dyM).rgb);
+            nm += wi * (ns + float3(nb.xy * 0.35, 0.0));
+        }
         if (HasNormalTexture != 0 && detailW > 0.001)
         {
             float2 ad = AtlasUV(uv * 7.3 + 0.37, i);

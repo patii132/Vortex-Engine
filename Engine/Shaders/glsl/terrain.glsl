@@ -420,8 +420,15 @@ vec2 sand_ripples(vec2 p, float cam_dist, float sand_w)
 	float f = fract(phase);
 	float slope = f < 0.7 ? 0.35 : -0.82;
 	slope *= smoothstep(0.0, 0.06, abs(f - 0.7)) * smoothstep(0.0, 0.04, min(f, 1.0 - f));   // rounded crests and troughs
-	return -slope * 0.16 * patches * fade * aa * wind;
+	return -slope * 0.09 * patches * fade * aa * wind;
 }
+// The layer's mean colour: one texel of the quadrant two mips above the smallest.
+vec3 layer_mean(int k)
+{
+	float amips = float(textureQueryLevels(u_albedo));
+	return srgb_to_linear(textureLod(u_albedo, vec2(float(k & 1) + 0.5, float(k >> 1) + 0.5) * 0.5, max(amips - 2.0, 0.0)).rgb);
+}
+
 float macro_variation(vec2 world_xz)
 {
 	float n = 0.65 * macro_noise(world_xz * 0.025) + 0.35 * macro_noise(world_xz * 0.11 + 7.3);
@@ -480,11 +487,23 @@ void main()
 		vec2 aM = atlas_uv(uv * 0.23 + vec2(0.21, 0.63), i);
 		vec2 dxM = dx * 0.23, dyM = dy * 0.23;
 		clamp_grad(dxM, dyM);
+		// the sharp sample keeps every texel; the 4.3x larger tiling only MODULATES its tone (sampled soft, three mips down)
+		// and adds a little of its slope — averaging the two halved the grain's contrast and made the sand look blurred
 		if (obj.has_albedo_texture != 0u)
-			albedo += wi * mix(srgb_to_linear(textureGrad(u_albedo, a, dx, dy).rgb), srgb_to_linear(textureGrad(u_albedo, aM, dxM, dyM).rgb), 0.5);
+		{
+			vec3 sharp = srgb_to_linear(textureGrad(u_albedo, a, dx, dy).rgb);
+			vec3 broad = srgb_to_linear(textureGrad(u_albedo, aM, dxM * 8.0, dyM * 8.0).rgb);
+			float lum_b = dot(broad, vec3(0.299, 0.587, 0.114));
+			float lum_m = dot(layer_mean(i), vec3(0.299, 0.587, 0.114));
+			albedo += wi * sharp * mix(1.0, lum_b / max(lum_m, 0.02), 0.45);
+		}
 		else albedo += wi * vec3(0.5);
 		if (obj.has_normal_texture != 0u)
-			nm += wi * mix(decode_n(textureGrad(u_normal, a, dx, dy).rgb), decode_n(textureGrad(u_normal, aM, dxM, dyM).rgb), 0.5);
+		{
+			vec3 ns = decode_n(textureGrad(u_normal, a, dx, dy).rgb);
+			vec3 nb = decode_n(textureGrad(u_normal, aM, dxM, dyM).rgb);
+			nm += wi * (ns + vec3(nb.xy * 0.35, 0.0));
+		}
 		if (obj.has_normal_texture != 0u && detail_w > 0.001)
 		{
 			vec2 ad = atlas_uv(uv * 7.3 + 0.37, i);

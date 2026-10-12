@@ -391,6 +391,8 @@ namespace VortexEditor.Shell
                 window.Add(Item(entry.Title, entry.Gesture, () => _ = Run(entry)));
             }
             window.Add(Sep());
+            window.Add(Item("Terrain Tools…", null, EditorWindows.TerrainTools));
+            window.Add(Sep());
             window.Add(Item("Reset Layout (show all panels, hide Claude)", null, EditorCommands.ResetLayout));
             menu.Items.Add(Sub("Window", window.ToArray()));
 
