@@ -472,8 +472,8 @@ fragment float4 PSMain(VSOut in [[stage_in]],
     // detail: the layer's own normal map again at 7.3x finer tiling, fading out beyond ~28 m — close-up ripples and grain
     float cam_dist = length(float3(frame.camera_position) - in.world_pos);
     float detail_w = saturate(1.0 - cam_dist / 70.0);
-    // far: beyond ~250 m blend to the layer's mean colour (the 2x2 mip = one texel per quadrant) and a flat normal
-    float far_w = saturate((cam_dist - 260.0) / 640.0);
+    // far: beyond ~520 m blend to the layer's mean colour (the 2x2 mip = one texel per quadrant) and a flat normal
+    float far_w = saturate((cam_dist - 520.0) / 900.0);
     for (int i = 0; i < 4; ++i)
     {
         float wi = w[i];

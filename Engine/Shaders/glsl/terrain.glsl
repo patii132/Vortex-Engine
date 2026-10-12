@@ -474,7 +474,7 @@ void main()
 	float cam_dist = length(frame.camera_position - v_world_pos);
 	float detail_w = clamp(1.0 - cam_dist / 70.0, 0.0, 1.0);
 	// far: beyond ~250 m blend to the layer's mean colour (the 2x2 mip = one texel per quadrant) and a flat normal
-	float far_w = clamp((cam_dist - 260.0) / 640.0, 0.0, 1.0);
+	float far_w = clamp((cam_dist - 520.0) / 900.0, 0.0, 1.0);
 	for (int i = 0; i < 4; ++i)
 	{
 		float wi = w[i];

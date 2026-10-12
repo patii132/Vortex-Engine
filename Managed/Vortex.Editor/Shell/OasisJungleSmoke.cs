@@ -77,13 +77,24 @@ namespace VortexEditor.Shell
             }
             log.Log("oasis jungle: " + removed + " earlier instances inside the zone removed");
             // the floor types draw closer and thin sooner everywhere: a jungle floor at 160 m is thousands of invisible fronds
+            // the budget (measured from the opening camera, 2026-10-12): the photoscanned shrubs, grass clumps and quiver trees
+            // cost 20 M of 30 M triangles — 6–23 k each, hundreds in range. They draw closer and thin sooner; the wind calms
+            // down everywhere (the user: "nicht zu viel Bewegung")
             foreach (var t in fc.Types)
             {
-                if (t.Name == "Searsia burchellii" || t.Name == "Searsia lucida" || t.Name == "Jungle fern") { t.CullDistance = 100f; t.ThinDistance = 28f; }
-                else if (t.Name == "Palm litter" || t.Name == "Palm litter pile" || t.Name == "Dry leaf") { t.CullDistance = 70f; t.ThinDistance = 22f; }
-                else if (t.Name == "Rooibos") { t.CullDistance = 80f; t.ThinDistance = 30f; }
-                else if (t.Name == "Grass") { t.CullDistance = 70f; t.ThinDistance = 22f; }
+                if (t.Name == "Searsia burchellii" || t.Name == "Searsia lucida" || t.Name == "Jungle fern") { t.CullDistance = 90f; t.ThinDistance = 24f; }
+                else if (t.Name == "Palm litter" || t.Name == "Palm litter pile") { t.CullDistance = 60f; t.ThinDistance = 18f; }
+                else if (t.Name == "Dry leaf") { t.CullDistance = 45f; t.ThinDistance = 15f; }
+                else if (t.Name == "Rooibos") { t.CullDistance = 55f; t.ThinDistance = 20f; }
+                else if (t.Name == "Didelta") { t.CullDistance = 70f; t.ThinDistance = 25f; }
+                else if (t.Name == "Succulent") { t.CullDistance = 45f; t.ThinDistance = 15f; }
+                else if (t.Name == "Grass" || t.Name == "Bermuda grass") { t.CullDistance = 45f; t.ThinDistance = 14f; }
+                else if (t.Name == "Stones" || t.Name == "Pebbles") { t.CullDistance = 60f; t.ThinDistance = 20f; }
+                else if (t.Name == "Quiver tree 1" || t.Name == "Quiver tree 2") { t.CullDistance = 320f; t.ThinDistance = 140f; }
+                if (t.WindStrength > 0f) t.WindStrength *= 0.5f;
+                t.WindSpeed = Math.Min(t.WindSpeed, 0.6f);
             }
+            fc.Wind = Math.Min(fc.Wind, 0.6f);
 
             var types = new Dictionary<string, FoliageType>();
             foreach (var t in fc.Types) types[t.Name] = t;
