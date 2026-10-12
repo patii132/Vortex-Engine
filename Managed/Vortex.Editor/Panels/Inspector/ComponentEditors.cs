@@ -301,12 +301,13 @@ namespace VortexEditor.Panels.Inspector
             var bias = Row("Bias", SliderRow(() => l.ShadowBias, v => { l.ShadowBias = v; D(); }, 0, 0.2, "0.###", 0f, null), "Higher = less shadow acne, but shadows detach from objects (peter-panning)");
             var nbias = Row("Normal bias", SliderRow(() => l.ShadowNormalBias, v => { l.ShadowNormalBias = v; D(); }, 0, 3, "0.##", 0f, null), "Offset along the surface normal — fixes acne on slopes");
             var res = Row("Resolution", Choice(() => ResIndex(l.ShadowResolution), v => { l.ShadowResolution = new[] { 512, 1024, 2048, 4096 }[v]; D(); }, "512", "1024", "2048", "4096"));
-            rows.Add(strength); rows.Add(bias); rows.Add(nbias); rows.Add(res);
+            var dist = Row("Distance", SliderRow(() => l.ShadowDistance, v => { l.ShadowDistance = v; D(); }, 5, 2000, "0", 5f, null), "How far from the camera the sun's shadows reach (m) — higher reaches further but softens near shadows");
+            rows.Add(strength); rows.Add(bias); rows.Add(nbias); rows.Add(res); rows.Add(dist);
             updateVis = () =>
             {
                 bool dir = l.LightType == LightType.Directional, isSpot = l.LightType == LightType.Spot, sh = l.ShadowType != ShadowType.None;
                 range.IsVisible = !dir; spot.IsVisible = isSpot; inner.IsVisible = isSpot;
-                strength.IsVisible = sh; bias.IsVisible = sh; nbias.IsVisible = sh; res.IsVisible = sh;
+                strength.IsVisible = sh; bias.IsVisible = sh; nbias.IsVisible = sh; res.IsVisible = sh; dist.IsVisible = sh && dir;
             };
             updateVis();
             return rows;

@@ -105,6 +105,30 @@ namespace VortexTests
         }
 
         [Test]
+        public static void SunShadowDistanceRoundTripsAndOldScenesKeep80(TestContext t)
+        {
+            var scene = new Scene { Name = "Open world" };
+            var sun = new GameEntity(scene, "Sun");
+            sun.AddComponentDirect(new Light(sun, LightType.Directional) { ShadowDistance = 600f });
+            scene.Entities.Add(sun);
+            t.Equal(600f, DataSerializer.FromBinary<Scene>(DataSerializer.ToBinary(scene)).Entities[0].GetComponent<Light>().ShadowDistance, "binary round trip");
+            string json = DataSerializer.ToJson(scene);
+            t.True(System.Text.RegularExpressions.Regex.IsMatch(json, "\"shadowDistance\"\\s*:\\s*600"), "written as shadowDistance");
+            t.Equal(600f, DataSerializer.FromJson<Scene>(json).Entities[0].GetComponent<Light>().ShadowDistance, "json round trip");
+
+            // a scene saved before the field existed: no constructor runs on load, the old 80 m must come back (not 0 -> 5 m)
+            string old = System.Text.RegularExpressions.Regex.Replace(json, ",\\s*\"shadowDistance\"\\s*:\\s*600", "");
+            t.False(old.Contains("shadowDistance"), "field removed from the old file");
+            t.Equal(Light.DefaultShadowDistance, DataSerializer.FromJson<Scene>(old).Entities[0].GetComponent<Light>().ShadowDistance, "old scene keeps 80 m");
+
+            var l = new Light();
+            t.Equal(80f, l.ShadowDistance, "new lights default to 80 m");
+            l.ShadowDistance = 1f; t.Equal(Light.MinShadowDistance, l.ShadowDistance, "clamped low");
+            l.ShadowDistance = 1e6f; t.Equal(Light.MaxShadowDistance, l.ShadowDistance, "clamped high");
+            l.ShadowDistance = float.NaN; t.Equal(80f, l.ShadowDistance, "NaN falls back to the default");
+        }
+
+        [Test]
         public static void PakRoundTripKeepsEveryByte(TestContext t)
         {
             var rnd = new Random(7);

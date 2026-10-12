@@ -43,6 +43,11 @@ namespace Editor.ECS.Components.Lighting
         private float _shadowNormalBias = 0.4f;
         private int _shadowResolution = 2048;
         private int _cullingMask = -1;
+        private float _shadowDistance = DefaultShadowDistance;
+
+        /// <summary>The sun's shadow reach before this setting existed (and the renderer's own default).</summary>
+        public const float DefaultShadowDistance = 80f;
+        public const float MinShadowDistance = 5f, MaxShadowDistance = 2000f;
 
         public override string DisplayName => $"{_lightType} Light";
         public override string IconCode => "\uE793";
@@ -190,6 +195,29 @@ namespace Editor.ECS.Components.Lighting
         {
             get => _cullingMask;
             set => SetProperty(ref _cullingMask, value, nameof(CullingMask));
+        }
+
+        /// <summary>
+        /// Directional only: how far from the camera the sun's cascaded shadows reach (world units). The three
+        /// cascades share the same shadow-map resolution, so a longer reach makes near shadows softer -
+        /// open worlds (driving, flying) want 300-1000, interiors and horror scenes the default 80.
+        /// </summary>
+        [DataMember(Name = "shadowDistance", Order = 24)]
+        public float ShadowDistance
+        {
+            get => _shadowDistance;
+            set => SetProperty(ref _shadowDistance, ClampShadowDistance(value), nameof(ShadowDistance));
+        }
+
+        public static float ClampShadowDistance(float v) =>
+            float.IsNaN(v) ? DefaultShadowDistance : (v < MinShadowDistance ? MinShadowDistance : (v > MaxShadowDistance ? MaxShadowDistance : v));
+
+        // The serializer skips constructors and field initializers: scenes saved before "shadowDistance" existed
+        // would load 0 (the renderer clamps that to 5 m) instead of the 80 m they always had.
+        [OnDeserializing]
+        private void OnDeserializingMethod(StreamingContext context)
+        {
+            _shadowDistance = DefaultShadowDistance;
         }
 
         // NOTE: the light's enabled flag is the base Component.IsEnabled ("isEnabled", Order 1). Light used to

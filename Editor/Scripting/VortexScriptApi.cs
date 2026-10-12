@@ -1920,6 +1920,10 @@ namespace Vortex
         }
         /// <summary>How dark the shadowed area gets: 1 = pitch black (horror default), 0 = shadows off.</summary>
         public float ShadowStrength { get { return _c.ShadowStrength; } set { _c.ShadowStrength = value; Dirty(); } }
+        /// <summary>Directional (sun) only: how far from the camera shadows reach, in world units (5..2000, default 80).
+        /// Open worlds raise it so shadows don't stop at the edge of a sphere around the camera; the cascades
+        /// spread over the longer reach, so near shadows get a little softer.</summary>
+        public float ShadowDistance { get { return _c.ShadowDistance; } set { _c.ShadowDistance = value; Dirty(); } }
 
         /// <summary>Procedural flicker in [0..1] — multiply into Intensity each Update() for a dying
         /// bulb: <c>light.Intensity = 40f * Light.Flicker(t, 14f);</c>. Two detuned sines, cheap + loopless.</summary>
