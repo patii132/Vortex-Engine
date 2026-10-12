@@ -55,13 +55,15 @@ find "$APP" -name ".DS_Store" -delete 2>/dev/null || true
 
 # icon: Logo.png -> AppIcon.icns
 ICONSET="$DIST/AppIcon.iconset"; rm -rf "$ICONSET"; mkdir -p "$ICONSET"
-SRC_PNG="$ROOT/Editor/Assets/Images/Logo.png"
+SRC_PNG=""
+for cand in "$ROOT/Managed/Vortex.Editor/Assets/Logo.png" "$ROOT/Editor/Assets/Images/Logo.png"; do [ -f "$cand" ] && SRC_PNG="$cand" && break; done
+[ -n "$SRC_PNG" ] || echo "warning: no Logo.png for the app icon (looked in Managed/Vortex.Editor/Assets and Editor/Assets/Images)"
 if [ -f "$SRC_PNG" ]; then
   for s in 16 32 64 128 256 512; do
     sips -z $s $s "$SRC_PNG" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null 2>&1
     d=$((s*2)); [ $d -le 1024 ] && sips -z $d $d "$SRC_PNG" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null 2>&1 || true
   done
-  iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns" 2>/dev/null || true
+  iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns" || echo "warning: iconutil failed — the app has no icon"
 fi
 rm -rf "$ICONSET"
 

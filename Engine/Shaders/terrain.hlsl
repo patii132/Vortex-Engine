@@ -497,7 +497,7 @@ float4 PSMain(PS_IN input) : SV_TARGET
     float detailW = saturate(1.0 - camDist / 70.0);
     // far: beyond ~250 m a tile is below the pixel — blend to the layer's mean colour and a flat normal (the 2x2 mip holds
     // exactly one texel per quadrant); the capped mip would otherwise shimmer with every camera move
-    float farW = saturate((camDist - 260.0) / 640.0);
+    float farW = saturate((camDist - 520.0) / 900.0);
     [unroll]
     for (int i = 0; i < 4; ++i)
     {
