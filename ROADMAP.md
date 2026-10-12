@@ -50,6 +50,10 @@ original-quality downloads (#289).
    leaf translucency (backlit crowns glow), procedural sand ripples, **dynamic GI step 2a: the bounce from the sun's
    shadow map** (the far cascade read as a reflective shadow map — off-screen sunlit ground lights trunks, walls and
    undergrowth), and the oasis calibrated against the reference pictures (measured sand hue within 3 %, shade 3 : 1).
+   Released as **v3.4.3** (2026-10-12) together with the editor's view saved per scene, the FX switch for post effects
+   in the viewport, the Terrain Tools palette (heightmap import / export, the noise generator, world-file previews),
+   sharp sand (the anti-repeat tiling modulates instead of averaging) and the oasis's overgrown corner (dense palms,
+   understorey, ferns, litter, lianas; real 4K palm bark).
 2. **Dynamic GI, the full build (#257) — the techniques behind Lumen, implemented from the published papers, never from
    Epic's source:**
    - step 2a ✅ *the bounce from the sun's shadow map* (2026-10-12): the sunlit world as seen by the sun is the emitter
