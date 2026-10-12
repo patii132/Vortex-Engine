@@ -272,7 +272,7 @@ namespace VortexEditor.Shell
             st.BloomEnabled = true; st.BloomThreshold = 0.95f; st.BloomIntensity = 0.18f; st.BloomScatter = 0.6f;   // 0.3 spread the sun into a white sheet
             // sun shafts through the palms: a thin volumetric haze marched 160 m, strongly forward-scattering
             st.VolumetricEnabled = true; st.VolumetricDensity = 0.0018f; st.VolumetricAnisotropy = 0.55f; st.VolumetricDistance = 120f;   // g 0.75 + sun 1.6 whited out a third of the frame around the sun (Henyey-Greenstein peaks 28x isotropic at g 0.75); the reference has soft shafts, not a sheet
-            st.VolumetricNoise = 0.25f; st.VolumetricNoiseScale = 12f; st.VolumetricNoiseSpeed = 0.2f; st.VolumetricSun = 0.6f;
+            st.VolumetricNoise = 0.25f; st.VolumetricNoiseScale = 12f; st.VolumetricNoiseSpeed = 0.2f; st.VolumetricSun = 0.3f;   // 0.6 whited out 12–16 % of a frame that looks towards the sun (the in-scatter sheet, measured 2026-10-12); 0.3 keeps the shafts and the sky
             st.VolumetricLights = 0f; st.VolumetricAmbient = 0.04f; st.VolumetricSteps = 20; st.VolumetricShadows = true;
             st.Apply();
 
