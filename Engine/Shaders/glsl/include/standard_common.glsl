@@ -30,19 +30,20 @@ layout(set = SET_UNIFORM, binding = 0, std140) uniform PerFrameBlock
 	float fog_height_y;           // @144
 	float fog_height_falloff;     // @148
 	uint  fog_mode;               // @152
-	float fog_padding;            // @156
+	float scene_exposure;         // @156  pre-tonemap multiplier (0.5 = classic; <= 0 reads as 0.5)
 	float shadow_map_texel;       // @160
-	uint  shadow_padding0;        // @164
-	uint  shadow_padding1;        // @168
+	uint  tonemapper;             // @164  0 = ACES fit, 1 = PBR Neutral
+	float gi_strength;            // @168  screen-space GI: > 0 = u_ssao.rgb carries bounce light
 	uint  shadow_padding2;        // @172
 	float ssao_enabled;           // @176
 	float ssao_padding0;          // @180  AO UV scale x
 	float ssao_padding1;          // @184  AO UV scale y
-	float ssao_padding2;          // @188
+	float fog_sun_glow;           // @188  the sun's glow in the fog (0 = off)
 	vec4  env_sky;                // @192  scene sky gradient for reflections (rgb); w = 1 when a sky is set
 	vec4  env_horizon;            // @208
 	vec4  env_ground;             // @224
-} frame;                          // = 240
+	vec4  camera_clip;            // @240  x near, y far clip of this view (#200 refraction / SSR)
+} frame;                          // = 256
 
 #ifdef VORTEX_NEED_PER_OBJECT
 layout(set = SET_UNIFORM, binding = 1, std140) uniform PerObjectBlock

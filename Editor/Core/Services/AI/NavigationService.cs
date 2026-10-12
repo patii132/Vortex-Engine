@@ -1036,7 +1036,7 @@ namespace Editor.Core.Services.AI
                 if (e == null || !e.IsActive) return;
                 if (Excluded(e)) return;
                 var terrain = e.GetComponent<Editor.ECS.Components.Rendering.Terrain>();
-                if (terrain != null && terrain.IsEnabled && terrain.Collision)
+                if (terrain != null && terrain.IsEnabled && terrain.Collision && terrain.Navigation)
                 {
                     // #124: the terrain's surface (every sample up to 257², coarser beyond) is level geometry
                     float cell;

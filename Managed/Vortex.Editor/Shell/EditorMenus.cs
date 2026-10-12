@@ -250,6 +250,7 @@ namespace VortexEditor.Shell
                 Item("Camera", null, () => EditorCommands.CreateCamera()),
                 Item("Decal", null, () => EditorCommands.CreateDecal()),
                 Item("Terrain", null, () => EditorCommands.CreateTerrain()),
+                Item("Terrain from Heightmap…", null, () => _ = EditorCommands.CreateTerrainFromHeightmap()),
                 Item("Foliage", null, () => EditorCommands.CreateFoliage()),
                 Item("Water", null, () => EditorCommands.CreateWater()),
                 Sub("Audio",
@@ -389,6 +390,8 @@ namespace VortexEditor.Shell
                 var entry = e;
                 window.Add(Item(entry.Title, entry.Gesture, () => _ = Run(entry)));
             }
+            window.Add(Sep());
+            window.Add(Item("Terrain Tools…", null, EditorWindows.TerrainTools));
             window.Add(Sep());
             window.Add(Item("Reset Layout (show all panels, hide Claude)", null, EditorCommands.ResetLayout));
             menu.Items.Add(Sub("Window", window.ToArray()));

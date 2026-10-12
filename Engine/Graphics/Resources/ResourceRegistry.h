@@ -1,4 +1,5 @@
 #pragma once
+#include "../Importers/TextureCompress.h"
 
 #include "../../Common/CommonHeaders.h"
 #include "../../Common/Id.h"
@@ -77,6 +78,8 @@ namespace vortex::graphics
 		// Import management
 		id::id_type import_model(const std::string& filepath);
 		id::id_type import_texture(const std::string& filepath, const std::string& name = "");
+		// A block-compressed picture with its mip chain (#179) — from the compressor or its disk cache.
+		id::id_type create_texture_compressed(const CompressedTexture& ct, const std::string& label);
 		// Decode the not-yet-cached files among `paths` on worker threads (GPU upload stays on this thread) and
 		// add them to the path cache, so the import_texture calls that follow are hits.
 		void prefetch_textures(const std::vector<std::string>& paths);
@@ -143,7 +146,7 @@ namespace vortex::graphics
 		void register_lod_chain(id::id_type base_mesh_id, const SubMeshData& submesh, const std::string& name);
 		std::unordered_map<id::id_type, LodChain> m_lod_chains;
 		// Shared cores so the file-based and in-memory import paths build resources identically.
-		id::id_type create_texture_from_image(ImageData& image_data, const std::string& label);
+		id::id_type create_texture_from_image(ImageData& image_data, const std::string& label, const std::string* cache_path = nullptr);
 		MultiMaterialImportResult build_model_result(ImportedModelData& model_data);
 
 		ID3D12Device* m_device{ nullptr };

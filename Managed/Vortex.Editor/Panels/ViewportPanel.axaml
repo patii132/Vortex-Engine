@@ -23,6 +23,8 @@
           <ToggleButton x:Name="GizmoToggle" Classes="icon" ToolTip.Tip="Gizmos" Click="OnGizmoToggle"><c:VxIcon Icon="Gizmo"/></ToggleButton>
           <ToggleButton x:Name="ColliderToggle" Classes="icon" ToolTip.Tip="Show collision (green net = solid, amber = trigger) — right-click: all colliders" Click="OnColliderToggle" PointerPressed="OnColliderPressed"><c:VxIcon Icon="Collider"/></ToggleButton>
           <ToggleButton x:Name="FpToggle" Classes="icon" ToolTip.Tip="First-person layer (render layer 1): hidden / in the world / as the game shows it" Click="OnFpToggle"><c:VxIcon Icon="Crosshair"/></ToggleButton>
+          <ToggleButton x:Name="FxToggle" Classes="icon" ToolTip.Tip="Post effects (FX): the scene's colour grade, bloom, FXAA, vignette, grain and aberration in this viewport — while building and while playing here. Remembered; off = a faster frame. The game window and the standalone player always apply them." Click="OnFxToggle"><c:VxIcon Icon="Sparkle"/></ToggleButton>
+          <Button x:Name="TerrainToolsButton" Classes="icon" ToolTip.Tip="Terrain Tools — create, import or generate a terrain, sculpt and paint it (Window ▸ Terrain Tools…)" Click="OnTerrainTools"><c:VxIcon Icon="World"/></Button>
           <Button x:Name="ViewOptionsButton" Classes="icon" ToolTip.Tip="View options — shading, snap size, camera speed" Click="OnViewOptions"><c:VxIcon Icon="More"/></Button>
         </WrapPanel>
         <WrapPanel x:Name="ViewGroup" Orientation="Horizontal" ItemSpacing="6" VerticalAlignment="Center">

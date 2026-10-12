@@ -106,6 +106,7 @@ namespace VortexEditor.Shell
                 var stdout = System.Console.Out;
                 console.EntryAdded += () => { try { if (console.Entries.Count > 0) { var le = console.Entries[console.Entries.Count - 1]; stdout.WriteLine("[" + le.LevelTag + "] " + le.Message); stdout.Flush(); } } catch { } };
                 SmokeRegistry.CaptureDir = o.CaptureDir;
+                _smokeInteractPending = true;   // the capture waits for the interaction chain (and the full smoke it starts), see SmokeCapture
                 DispatcherTimer.RunOnce(SmokeInteract, TimeSpan.FromSeconds(Math.Max(1, o.SmokeSeconds - 4)));
                 // the end-to-end play check (VORTEX_SMOKE_PLAYFIRE) compiles scripts + waits for the weapon draw: give it time
                 double captureAt = o.SmokeSeconds + (System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_PLAYFIRE") == "1" ? 30 : 0);
@@ -157,6 +158,9 @@ namespace VortexEditor.Shell
 
         /// <summary>Smoke test: select an entity, switch the tool, click into the viewport, check the mouse buttons,
         /// then run the full check list (VORTEX_SMOKE_FULL) or the play fire/aim check (VORTEX_SMOKE_PLAYFIRE).</summary>
+        private bool _smokeInteractPending;      // the interaction chain (click, mouse buttons, then the full smoke) has not handed over yet
+        private DateTime _smokeCaptureDeadline;   // the capture waits for that chain, but not forever
+
         private void SmokeInteract()
         {
             try
@@ -190,6 +194,7 @@ namespace VortexEditor.Shell
                         log.LogError("SMOKE FAIL viewport click / mouse buttons: the macOS screen is locked — synthetic clicks cannot be routed to an uncomposited window (unlock the Mac and re-run)");
                         if (System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_PLAYFIRE") == "1") log.LogError("SMOKE FAIL play: mouse fire/aim needs an unlocked screen");
                         else if (System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_FULL") == "1") SmokeFull(scene);
+                        _smokeInteractPending = false;
                         return;
                     }
                     // An activation in flight makes AppKit drop the event: wait for it, then post the click and give the
@@ -232,6 +237,7 @@ namespace VortexEditor.Shell
                                     else log.LogError("SMOKE FAIL mouse buttons do not reach Input.GetKey (" + r + ")");
                                     if (System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_PLAYFIRE") == "1") SmokePlayFire(ev);
                                     else if (System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_FULL") == "1") SmokeFull(scene);
+                                    _smokeInteractPending = false;
                                 }, TimeSpan.FromMilliseconds(200));
                             }, TimeSpan.FromMilliseconds(200));
                         }, TimeSpan.FromMilliseconds(200));
@@ -249,6 +255,7 @@ namespace VortexEditor.Shell
                     {
                         if (System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_PLAYFIRE") == "1") SmokePlayFire(ev);
                         else if (System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_FULL") == "1") SmokeFull(scene);
+                        _smokeInteractPending = false;
                     }
                     DispatcherTimer.RunOnce(() =>
                     {
@@ -258,31 +265,44 @@ namespace VortexEditor.Shell
                         {
                             if (posted && ev.PointerPressCount > presses) log.Log("SMOKE OK   viewport click routed to the toolkit (" + what + ")");
                             else log.LogError("SMOKE FAIL viewport click not received (" + what + ", posted=" + posted + ", presses=" + ev.PointerPressCount + ")");
-                            VortexEditor.Viewport.Win32ViewportInput.MouseButton(ev, top, false, true);
-                            DispatcherTimer.RunOnce(() =>
+                            // Each button state is WAITED for (up to 2 s, polled every 50 ms), not read after a fixed 200 ms: on the CI
+                            // runner's WARP device one frame can take longer than that, and the engine's key state only moves per frame
+                            // (the check failed there with the release still pending; 2026-10-11).
+                            void WaitFor(Func<bool> cond, Action<bool> then)
                             {
-                                bool lDown = Editor.Core.Input.HostInput.IsKeyDown(0x01);
-                                VortexEditor.Viewport.Win32ViewportInput.MouseButton(ev, top, false, false);
-                                VortexEditor.Viewport.Win32ViewportInput.MouseButton(ev, top, true, true);
-                                DispatcherTimer.RunOnce(() =>
+                                var started = DateTime.UtcNow;
+                                void Tick()
                                 {
-                                    bool lUp = !Editor.Core.Input.HostInput.IsKeyDown(0x01);
-                                    bool rDown = Editor.Core.Input.HostInput.IsKeyDown(0x02);
-                                    VortexEditor.Viewport.Win32ViewportInput.MouseButton(ev, top, true, false);
-                                    DispatcherTimer.RunOnce(() =>
+                                    bool ok = false; try { ok = cond(); } catch { }
+                                    if (ok || (DateTime.UtcNow - started).TotalMilliseconds > 2000) then(ok);
+                                    else DispatcherTimer.RunOnce(Tick, TimeSpan.FromMilliseconds(50));
+                                }
+                                DispatcherTimer.RunOnce(Tick, TimeSpan.FromMilliseconds(50));
+                            }
+                            VortexEditor.Viewport.Win32ViewportInput.MouseButton(ev, top, false, true);
+                            WaitFor(() => Editor.Core.Input.HostInput.IsKeyDown(0x01), lDown =>
+                            {
+                                VortexEditor.Viewport.Win32ViewportInput.MouseButton(ev, top, false, false);
+                                WaitFor(() => !Editor.Core.Input.HostInput.IsKeyDown(0x01), lUp =>
+                                {
+                                    VortexEditor.Viewport.Win32ViewportInput.MouseButton(ev, top, true, true);
+                                    WaitFor(() => Editor.Core.Input.HostInput.IsKeyDown(0x02), rDown =>
                                     {
-                                        bool rUp = !Editor.Core.Input.HostInput.IsKeyDown(0x02);
-                                        string r = "LButton down=" + lDown + " up=" + lUp + ", RButton down=" + rDown + " up=" + rUp;
-                                        if (lDown && lUp && rDown && rUp) log.Log("SMOKE OK   mouse buttons reach Input.GetKey (" + r + ")");
-                                        else log.LogError("SMOKE FAIL mouse buttons do not reach Input.GetKey (" + r + ")");
-                                        ContinueWin();
-                                    }, TimeSpan.FromMilliseconds(200));
-                                }, TimeSpan.FromMilliseconds(200));
-                            }, TimeSpan.FromMilliseconds(200));
+                                        VortexEditor.Viewport.Win32ViewportInput.MouseButton(ev, top, true, false);
+                                        WaitFor(() => !Editor.Core.Input.HostInput.IsKeyDown(0x02), rUp =>
+                                        {
+                                            string r = "LButton down=" + lDown + " up=" + lUp + ", RButton down=" + rDown + " up=" + rUp;
+                                            if (lDown && lUp && rDown && rUp) log.Log("SMOKE OK   mouse buttons reach Input.GetKey (" + r + ")");
+                                            else log.LogError("SMOKE FAIL mouse buttons do not reach Input.GetKey (" + r + ")");
+                                            ContinueWin();
+                                        });
+                                    });
+                                });
+                            });
                         }, TimeSpan.FromMilliseconds(400));
                     }, TimeSpan.FromMilliseconds(500));
                 }
-                else if (System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_FULL") == "1") SmokeFull(scene);
+                else { if (System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_FULL") == "1") SmokeFull(scene); _smokeInteractPending = false; }
                 if (System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_FX") == "1" && scene?.Settings != null)
                 {
                     // Same path as the Environment panel: SSAO + bloom + vignette, previewed in the build viewport.
@@ -297,14 +317,18 @@ namespace VortexEditor.Shell
                 }
                 BottomTabs.SelectedIndex = 0;
             }
-            catch (Exception ex) { System.Console.WriteLine("smoke interact failed: " + ex); }
+            catch (Exception ex) { System.Console.WriteLine("smoke interact failed: " + ex); _smokeInteractPending = false; }
         }
 
         /// <summary>Exercise the main command paths (create, undo/redo, components, save, secondary view, export) and log the outcome.</summary>
         private void SmokeFull(Scene scene)
         {
             var log = ConsoleService.Instance;
-            void Check(string what, Func<bool> f) { bool ok = false; string err = null; try { ok = f(); } catch (Exception ex) { err = ex.Message; } if (ok) log.Log("SMOKE OK   " + what); else log.LogError("SMOKE FAIL " + what + (err != null ? ": " + err : "")); }
+            // VORTEX_SMOKE_SKIP="split view,export": leave out the built-in checks whose name contains one of the parts (bisecting
+            // a check that disturbs a registered one, e.g. a template capture)
+            string skipList = System.Environment.GetEnvironmentVariable("VORTEX_SMOKE_SKIP") ?? "";
+            string[] skipParts = Array.FindAll(skipList.Split(','), p => p.Trim().Length > 0);
+            void Check(string what, Func<bool> f) { if (Array.Exists(skipParts, p => what.IndexOf(p.Trim(), StringComparison.OrdinalIgnoreCase) >= 0)) { log.Log("SMOKE SKIP " + what); return; } bool ok = false; string err = null; try { ok = f(); } catch (Exception ex) { err = ex.Message; } if (ok) log.Log("SMOKE OK   " + what); else log.LogError("SMOKE FAIL " + what + (err != null ? ": " + err : "")); }
             int before = scene?.Entities?.Count ?? 0;
             Check("create cube", () => { EditorCommands.CreatePrimitive(PrimitiveType.Cube); return scene.Entities.Count == before + 1; });
             Check("undo create", () => { EditorCommands.Undo(); return scene.Entities.Count == before; });
@@ -392,8 +416,11 @@ namespace VortexEditor.Shell
 
         private void SmokeCapture(string dir)
         {
-            // registered window checks may still be running (they open windows, render previews): wait for them
-            if (SmokeRegistry.Running) { DispatcherTimer.RunOnce(() => SmokeCapture(dir), TimeSpan.FromMilliseconds(500)); return; }
+            // registered window checks may still be running (they open windows, render previews): wait for them — and for the
+            // interaction chain that starts the full smoke. On a slow runner the start-up overran the smoke clock, the interact
+            // and capture timers fired back to back and the window closed before the first click was checked (CI, 2026-10-11).
+            if (_smokeCaptureDeadline == default) _smokeCaptureDeadline = DateTime.UtcNow.AddSeconds(240);
+            if (SmokeRegistry.Running || (_smokeInteractPending && DateTime.UtcNow < _smokeCaptureDeadline)) { DispatcherTimer.RunOnce(() => SmokeCapture(dir), TimeSpan.FromMilliseconds(500)); return; }
             try
             {
                 dir = string.IsNullOrEmpty(dir) ? Path.GetTempPath() : dir;

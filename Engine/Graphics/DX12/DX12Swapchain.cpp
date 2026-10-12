@@ -1,4 +1,6 @@
 #include "DX12Swapchain.h"
+#include "../../Common/Platform.h"
+#include <cstdio>
 
 namespace vortex::graphics::dx12
 {
@@ -86,7 +88,23 @@ namespace vortex::graphics::dx12
 		// DXGI_ERROR_INVALID_CALL), so gate it strictly on !vsync.
 		UINT sync = vsync ? 1 : 0;
 		UINT flags = (!vsync && m_allow_tearing) ? DXGI_PRESENT_ALLOW_TEARING : 0;
-		m_swapchain->Present(sync, flags);
+		HRESULT hr = m_swapchain->Present(sync, flags);
+		if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET)
+		{
+			// the GPU driver reset or crashed (a TDR, an overheating card, a driver update under a running editor): say so
+			// once with the reason, so the crash report names the cause instead of a later access violation
+			static bool reported = false;
+			if (!reported)
+			{
+				reported = true;
+				HRESULT reason = hr;
+				ComPtr<ID3D12Device> dev;
+				if (SUCCEEDED(m_swapchain->GetDevice(IID_PPV_ARGS(&dev))) && dev) reason = dev->GetDeviceRemovedReason();
+				char msg[160];
+				snprintf(msg, sizeof(msg), "[dx12] THE GPU DEVICE WAS LOST (Present 0x%08X, reason 0x%08X) - the driver reset; restart the editor\n", (unsigned)hr, (unsigned)reason);
+				platform::debug_output(msg);
+			}
+		}
 		m_current_index = m_swapchain->GetCurrentBackBufferIndex();
 	}
 

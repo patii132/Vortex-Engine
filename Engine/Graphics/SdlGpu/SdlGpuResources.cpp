@@ -145,6 +145,10 @@ namespace vortex::graphics
 		case TextureFormat::RG8_UNORM: return SDL_GPU_TEXTUREFORMAT_R8G8_UNORM;
 		case TextureFormat::RGBA16_FLOAT: return SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
 		case TextureFormat::RGBA32_FLOAT: return SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT;
+		case TextureFormat::BC1_UNORM: return SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM;
+		case TextureFormat::BC3_UNORM: return SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM;
+		case TextureFormat::BC4_UNORM: return SDL_GPU_TEXTUREFORMAT_BC4_R_UNORM;
+		case TextureFormat::BC5_UNORM: return SDL_GPU_TEXTUREFORMAT_BC5_RG_UNORM;
 		case TextureFormat::D24_UNORM_S8_UINT: return SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT;
 		case TextureFormat::D32_FLOAT: return SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
 		default: return SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
@@ -163,6 +167,21 @@ namespace vortex::graphics
 		}
 	}
 
+	u64 Texture::level_bytes(TextureFormat f, u32 w, u32 h)
+	{
+		if (is_block_format(f)) return (u64)((w + 3) / 4) * (u64)((h + 3) / 4) * ((f == TextureFormat::BC1_UNORM || f == TextureFormat::BC4_UNORM) ? 8u : 16u);
+		return (u64)w * h * bytes_per_pixel(f);
+	}
+
+	bool Texture::supports_block_formats(SDL_GPUDevice* device)
+	{
+		static int cached = -1;
+		if (cached < 0 && device)
+			cached = (SDL_GPUTextureSupportsFormat(device, SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_SAMPLER)
+				&& SDL_GPUTextureSupportsFormat(device, SDL_GPU_TEXTUREFORMAT_BC5_RG_UNORM, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_SAMPLER)) ? 1 : 0;
+		return cached == 1;
+	}
+
 	bool Texture::create(SDL_GPUDevice* device, const TextureDesc& desc, const void* data)
 	{
 		if (!device || desc.width == 0 || desc.height == 0) return false;
@@ -173,7 +192,9 @@ namespace vortex::graphics
 		m_format = desc.format;
 
 		u32 mip_count = 1;
-		if (desc.generate_mips && data && !desc.is_render_target && !desc.is_depth_stencil)
+		const bool provided = desc.mip_count > 1 && data != nullptr;   // the caller built the chain (block formats, #179)
+		if (provided) mip_count = desc.mip_count;
+		else if (desc.generate_mips && data && !desc.is_render_target && !desc.is_depth_stencil)
 		{
 			u32 dim = desc.width > desc.height ? desc.width : desc.height;
 			while (dim > 1) { dim >>= 1; ++mip_count; }
@@ -200,8 +221,19 @@ namespace vortex::graphics
 
 		if (data && !desc.is_depth_stencil && !desc.is_render_target)
 		{
-			const u32 bpp = bytes_per_pixel(desc.format);
-			const u32 size = desc.width * desc.height * bpp;
+			// the levels: one tightly packed chain when the caller built it, else level 0 and the GPU's mip generation
+			std::vector<u64> offsets(mip_count, 0);
+			u64 total = 0;
+			{
+				u32 lw = desc.width, lh = desc.height;
+				for (u32 m = 0; m < (provided ? mip_count : 1u); ++m)
+				{
+					offsets[m] = total;
+					total += level_bytes(desc.format, lw, lh);
+					lw = lw > 1 ? lw >> 1 : 1; lh = lh > 1 ? lh >> 1 : 1;
+				}
+			}
+			const u32 size = (u32)total;
 
 			SDL_GPUTransferBufferCreateInfo xci{};
 			xci.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
@@ -215,17 +247,25 @@ namespace vortex::graphics
 
 			SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
 			SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
-			SDL_GPUTextureTransferInfo src{};
-			src.transfer_buffer = transfer;
-			src.offset = 0;
-			src.pixels_per_row = desc.width;
-			src.rows_per_layer = desc.height;
-			SDL_GPUTextureRegion dst{};
-			dst.texture = m_texture;
-			dst.w = desc.width; dst.h = desc.height; dst.d = 1;
-			SDL_UploadToGPUTexture(copy, &src, &dst, false);
+			{
+				u32 lw = desc.width, lh = desc.height;
+				for (u32 m = 0; m < (provided ? mip_count : 1u); ++m)
+				{
+					SDL_GPUTextureTransferInfo src{};
+					src.transfer_buffer = transfer;
+					src.offset = (Uint32)offsets[m];
+					src.pixels_per_row = 0;    // tightly packed (block rows for BCn)
+					src.rows_per_layer = 0;
+					SDL_GPUTextureRegion dst{};
+					dst.texture = m_texture;
+					dst.mip_level = m;
+					dst.w = lw; dst.h = lh; dst.d = 1;
+					SDL_UploadToGPUTexture(copy, &src, &dst, false);
+					lw = lw > 1 ? lw >> 1 : 1; lh = lh > 1 ? lh >> 1 : 1;
+				}
+			}
 			SDL_EndGPUCopyPass(copy);
-			if (mip_count > 1) SDL_GenerateMipmapsForGPUTexture(cmd, m_texture);
+			if (mip_count > 1 && !provided) SDL_GenerateMipmapsForGPUTexture(cmd, m_texture);
 			SDL_SubmitGPUCommandBuffer(cmd);
 			SDL_ReleaseGPUTransferBuffer(device, transfer);
 		}
@@ -534,13 +574,24 @@ namespace vortex::graphics
 			auto it = m_texture_path_cache.find(key);
 			if (it != m_texture_path_cache.end() && get_texture(it->second)) return it->second;
 		}
+		// the compressed-texture cache (#179): a known file skips the decode and the encode
+		if (TextureCompress::enabled() && !TextureCompress::cache_dir().empty())
+		{
+			const std::string ck = TextureCompress::cache_key(filepath, CompressKind::Auto);
+			CompressedTexture ct;
+			if (!ck.empty() && TextureCompress::load_cached(ck, ct))
+			{
+				const id::id_type cid = create_texture_compressed(ct, filepath + " (cache)");
+				if (cid != id::invalid_id) { if (!key.empty()) { m_texture_path_cache[key] = cid; retire_stale_textures(filepath, cid); } return cid; }
+			}
+		}
 		ImageData image_data = TextureImporter::import_from_file(filepath);
 		if (!image_data.is_valid())
 		{
 			VORTEX_VLOG(("Failed to load texture: " + filepath + "\n").c_str());
 			return id::invalid_id;
 		}
-		const id::id_type id = create_texture_from_image(image_data, filepath);
+		const id::id_type id = create_texture_from_image(image_data, filepath, &filepath);
 		if (!key.empty() && id != id::invalid_id) { m_texture_path_cache[key] = id; retire_stale_textures(filepath, id); }
 		return id;
 	}
@@ -556,6 +607,16 @@ namespace vortex::graphics
 			if (key.empty()) continue;
 			auto hit = m_texture_path_cache.find(key);
 			if (hit != m_texture_path_cache.end() && get_texture(hit->second)) continue;
+			if (TextureCompress::enabled() && !TextureCompress::cache_dir().empty())
+			{
+				CompressedTexture ct;
+				const std::string ck = TextureCompress::cache_key(p, CompressKind::Auto);
+				if (!ck.empty() && TextureCompress::load_cached(ck, ct))
+				{
+					const id::id_type cid = create_texture_compressed(ct, p + " (cache)");
+					if (cid != id::invalid_id) { m_texture_path_cache[key] = cid; retire_stale_textures(p, cid); continue; }
+				}
+			}
 			bool dup = false;
 			for (const auto& t : todo) if (t.second == key) { dup = true; break; }
 			if (!dup) todo.emplace_back(p, std::move(key));
@@ -573,7 +634,7 @@ namespace vortex::graphics
 			{
 				ImageData image = jobs[i - start].get();
 				if (!image.is_valid()) continue;
-				const id::id_type id = create_texture_from_image(image, todo[i].first);
+				const id::id_type id = create_texture_from_image(image, todo[i].first, &todo[i].first);
 				if (id != id::invalid_id) { m_texture_path_cache[todo[i].second] = id; retire_stale_textures(todo[i].first, id); }
 			}
 		}
@@ -587,7 +648,26 @@ namespace vortex::graphics
 		return create_texture_from_image(image_data, name.empty() ? std::string("memtex") : name);
 	}
 
-	id::id_type ResourceRegistry::create_texture_from_image(ImageData& image_data, const std::string& label)
+	id::id_type ResourceRegistry::create_texture_compressed(const CompressedTexture& ct, const std::string& label)
+	{
+		if (!m_device || ct.data.empty() || ct.mip_count == 0) return id::invalid_id;
+		TextureDesc desc;
+		desc.width = ct.width; desc.height = ct.height;
+		desc.mip_count = ct.mip_count;
+		switch (ct.format)
+		{
+		case BlockFormat::BC1: desc.format = TextureFormat::BC1_UNORM; break;
+		case BlockFormat::BC3: desc.format = TextureFormat::BC3_UNORM; break;
+		case BlockFormat::BC4: desc.format = TextureFormat::BC4_UNORM; break;
+		default: desc.format = TextureFormat::BC5_UNORM; break;
+		}
+		VORTEX_VLOG(("texture " + label + ": " + std::to_string(ct.width) + "x" + std::to_string(ct.height) + " " + TextureCompress::format_name(ct.format)
+			+ " " + std::to_string(ct.data.size() / 1024) + " KB with " + std::to_string(ct.mip_count) + " mips (RGBA8 would be "
+			+ std::to_string((size_t)ct.width * ct.height * 4 * 4 / 3 / 1024) + " KB)\n").c_str());
+		return create_texture(desc, ct.data.data());
+	}
+
+	id::id_type ResourceRegistry::create_texture_from_image(ImageData& image_data, const std::string& label, const std::string* cache_path)
 	{
 		VORTEX_VLOG(("Loaded texture: " + label + " (" + std::to_string(image_data.width) + "x" +
 			std::to_string(image_data.height) + ")\n").c_str());
@@ -618,7 +698,21 @@ namespace vortex::graphics
 		{
 		case ImageFormat::R8: desc.format = TextureFormat::R8_UNORM; break;
 		case ImageFormat::RG8: desc.format = TextureFormat::RG8_UNORM; break;
+		case ImageFormat::RGBA16F: desc.format = TextureFormat::RGBA16_FLOAT; desc.generate_mips = false; break;   // an HDR sky: mip 0 only
 		default: desc.format = TextureFormat::RGBA8_UNORM; break;
+		}
+		// block compression (#179): a big RGBA8 picture goes to the GPU as BC1 / BC3 / BC5 with its mip chain — a quarter
+		// to an eighth of the memory and bandwidth; cached on disk by file when the path is known
+		if (desc.format == TextureFormat::RGBA8_UNORM && TextureCompress::eligible(image_data.width, image_data.height) && Texture::supports_block_formats(m_device))
+		{
+			CompressedTexture ct;
+			const CompressKind kind = TextureCompress::kind_for(label, pixel_data, image_data.width, image_data.height);
+			if (TextureCompress::compress_rgba8(pixel_data, image_data.width, image_data.height, kind, true, ct))
+			{
+				if (cache_path) TextureCompress::save_cached(TextureCompress::cache_key(*cache_path, CompressKind::Auto), ct);
+				const id::id_type cid = create_texture_compressed(ct, label);
+				if (cid != id::invalid_id) return cid;
+			}
 		}
 		return create_texture(desc, pixel_data);
 	}

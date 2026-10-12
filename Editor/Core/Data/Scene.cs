@@ -257,6 +257,8 @@ namespace Editor.Core.Data
                 Directory.CreateDirectory(directory);
             }
 
+            // the editor's view travels with the scene: whoever opens it next starts where it was saved from
+            try { if (ReferenceEquals(ProjectData.Current?.ActiveScene, this)) Services.EditorViewState.Capture(this); } catch { }
             Serialization.DataSerializer.SaveAsBinary(this, FilePath);
             IsDirty = false;
         }

@@ -30,6 +30,30 @@ float hash21(vec2 p)
 	return fract(p.x * p.y);
 }
 
+// FXAA 3.11 (the console variant): nine samples, no history — see postfx.hlsl
+float fxaa_luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+vec3 fxaa(vec2 uv, vec2 texel)
+{
+	vec3 rgbM = texture(u_src, uv).rgb;
+	vec3 rgbNW = texture(u_src, uv + vec2(-1.0, -1.0) * texel).rgb;
+	vec3 rgbNE = texture(u_src, uv + vec2(1.0, -1.0) * texel).rgb;
+	vec3 rgbSW = texture(u_src, uv + vec2(-1.0, 1.0) * texel).rgb;
+	vec3 rgbSE = texture(u_src, uv + vec2(1.0, 1.0) * texel).rgb;
+	float lumaM = fxaa_luma(rgbM), lumaNW = fxaa_luma(rgbNW), lumaNE = fxaa_luma(rgbNE), lumaSW = fxaa_luma(rgbSW), lumaSE = fxaa_luma(rgbSE);
+	float lumaMin = min(lumaM, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
+	float lumaMax = max(lumaM, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
+	vec2 dir;
+	dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
+	dir.y = ((lumaNW + lumaSW) - (lumaNE + lumaSE));
+	float dirReduce = max((lumaNW + lumaNE + lumaSW + lumaSE) * (0.25 * (1.0 / 8.0)), 1.0 / 128.0);
+	float rcpDirMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);
+	dir = min(vec2(8.0), max(vec2(-8.0), dir * rcpDirMin)) * texel;
+	vec3 rgbA = 0.5 * (texture(u_src, uv + dir * (1.0 / 3.0 - 0.5)).rgb + texture(u_src, uv + dir * (2.0 / 3.0 - 0.5)).rgb);
+	vec3 rgbB = rgbA * 0.5 + 0.25 * (texture(u_src, uv + dir * -0.5).rgb + texture(u_src, uv + dir * 0.5).rgb);
+	float lumaB = fxaa_luma(rgbB);
+	return (lumaB < lumaMin || lumaB > lumaMax) ? rgbA : rgbB;
+}
+
 void main()
 {
 	vec2 uv = v_uv;
@@ -42,6 +66,10 @@ void main()
 		col.r = texture(u_src, uv + from_c * amt).r;
 		col.g = texture(u_src, uv).g;
 		col.b = texture(u_src, uv - from_c * amt).b;
+	}
+	else if ((c.flags & 64u) != 0u)
+	{
+		col = fxaa(uv, c.texel_size);   // anti-aliasing on the LDR picture
 	}
 	else
 	{

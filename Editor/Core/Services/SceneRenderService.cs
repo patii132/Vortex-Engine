@@ -367,6 +367,8 @@ namespace Editor.Core.Services
         /// references any more — a scene switch (#358); a live re-import keeps the materials (InvalidateModel).</summary>
         private static void EvictModel(string modelPath)
         {
+            // whatever still holds this model's mesh ids must reload: the foliage runtimes cache them per type (#125)
+            try { Editor.Core.Services.Foliage.FoliageService.Clear(); } catch { }
             string target = NormalizeModelPath(modelPath);
             var mats = new HashSet<long>();
             foreach (var kv in _meshPathToMaterialId) if (SameModel(kv.Key, target) && kv.Value >= 0) mats.Add(kv.Value);
@@ -407,6 +409,12 @@ namespace Editor.Core.Services
                 if (e == null) continue;
                 var mr = e.GetComponent<MeshRenderer>();
                 if (mr != null && !string.IsNullOrEmpty(mr.MeshPath) && !IsPrimitivePath(mr.MeshPath)) into.Add(NormalizeModelPath(mr.MeshPath));
+                // painted vegetation (#125) references its models through the Foliage component's types, not a MeshRenderer:
+                // a scene switch evicted them and the foliage runtimes kept drawing dead mesh ids (nothing on screen)
+                var fol = e.GetComponent<Editor.ECS.Components.Rendering.Foliage>();
+                if (fol != null && fol.Types != null)
+                    foreach (var t in fol.Types)
+                        if (t != null && !string.IsNullOrEmpty(t.MeshPath)) into.Add(NormalizeModelPath(t.MeshPath));
                 if (e.Children != null) CollectModelPaths(e.Children, into);
             }
         }
@@ -2410,6 +2418,8 @@ namespace Editor.Core.Services
 
         private bool _hasSceneLights = false;
         private bool _hasDirectionalLight = false;
+        // the sun as last submitted (the sky light's ground bounce reads it): colour × intensity and the direction's y
+        private float _sunR = 1f, _sunG = 1f, _sunB = 1f, _sunIntensity = 0f, _sunDirY = -1f;
         /// <summary>With <see cref="DebugThirdPersonView"/>: render the first-person viewmodel (layer 1) as world
         /// geometry and hide the third-person body — for inspecting the FP arms + weapon from outside
         /// (VM_DBGCAM_FP=1 in the standalone player).</summary>
@@ -2502,6 +2512,14 @@ namespace Editor.Core.Services
                     c = SkyLight.FromGradient(skybox.TopColorR * e, skybox.TopColorG * e, skybox.TopColorB * e, skybox.HorizonColorR * e, skybox.HorizonColorG * e, skybox.HorizonColorB * e, skybox.BottomColorR * e, skybox.BottomColorG * e, skybox.BottomColorB * e);
             }
             catch { c = null; }
+            // the ground bounce: the sun's light off the ground into the shadows (scene settings)
+            try
+            {
+                var st = Data.ProjectData.Current?.ActiveScene?.Settings;
+                if (st != null && st.BounceStrength > 0f)
+                    c = SkyLight.WithGroundBounce(c, st.BounceStrength, st.BounceR, st.BounceG, st.BounceB, _sunR, _sunG, _sunB, _sunIntensity, _sunDirY);
+            }
+            catch { }
             PushSkyLight(c);
             SkyLight.ReflectionMap m = null;
             try
@@ -2537,6 +2555,14 @@ namespace Editor.Core.Services
                     c = SkyLight.FromGradient(g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7], g[8]);
             }
             catch { c = null; }
+            // the ground bounce: the sun's light off the ground into the shadows (scene settings)
+            try
+            {
+                var st = Data.ProjectData.Current?.ActiveScene?.Settings;
+                if (st != null && st.BounceStrength > 0f)
+                    c = SkyLight.WithGroundBounce(c, st.BounceStrength, st.BounceR, st.BounceG, st.BounceB, _sunR, _sunG, _sunB, _sunIntensity, _sunDirY);
+            }
+            catch { }
             PushSkyLight(c);
             SkyLight.ReflectionMap m = null;
             try
@@ -2693,6 +2719,7 @@ namespace Editor.Core.Services
                     {
                         case ECS.Components.Lighting.LightType.Directional:
                             _hasDirectionalLight = true;
+                            _sunR = light.ColorR; _sunG = light.ColorG; _sunB = light.ColorB; _sunIntensity = light.Intensity; _sunDirY = dirY;
                             // CSM (#24): ShadowType != None turns on the sun's cascade pass. Bias mapping:
                             // the component's legacy 0.05 default scales by 0.016 to land on the tuned
                             // CSM NDC bias (0.0008); user tweaks stay proportional (same idea as spots).
@@ -2703,6 +2730,8 @@ namespace Editor.Core.Services
                                 light.ShadowType != ECS.Components.Lighting.ShadowType.None,
                                 light.ShadowStrength,
                                 light.ShadowBias * 0.016f);
+                            // Soft = a 16-tap Poisson disk of 4 shadow texels (a penumbra), Hard = the 3x3 box
+                            VortexAPI.SetDirectionalShadowSoftnessTexels(light.ShadowType == ECS.Components.Lighting.ShadowType.Soft ? 10.0f : 1.0f);   // the cap of the contact-hardening filter: the radius grows with the blocker distance, so a wide cap keeps contact shadows sharp
                             break;
 
                         case ECS.Components.Lighting.LightType.Point:
@@ -2791,7 +2820,15 @@ namespace Editor.Core.Services
 
             VortexAPI.EnableSkybox(true);
             VortexAPI.SetSkyboxRenderMode(VortexAPI.SkyboxMode.Texture);
-            VortexAPI.ApplySkyboxTexture(_skyboxTextureId, exposure, rotationDeg);
+            // a Radiance .hdr keeps its range (RGBA16F): where the scene uses the exposure pipeline (a scene exposure or the
+            // neutral tonemapper) the sky pass exposes + tonemaps it like the lit surfaces; other scenes keep the classic look
+            int hdrMode = 0;
+            if (fullTexturePath.EndsWith(".hdr", StringComparison.OrdinalIgnoreCase))
+            {
+                var st = Data.ProjectData.Current?.ActiveScene?.Settings;
+                hdrMode = st != null && (st.SceneExposure != 0f || st.Tonemapper != 0) ? 2 : 1;
+            }
+            VortexAPI.ApplySkyboxTexture(_skyboxTextureId, exposure, rotationDeg, hdrMode);
             return true;
         }
 

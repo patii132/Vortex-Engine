@@ -63,7 +63,7 @@ void main()
 	float ndotl = max(dot(N, L), 0.0);
 	vec3 color = albedo * (frame.light_color * frame.directional_intensity * ndotl + frame.ambient_strength);
 
-	color = aces_tonemap(color);
+	color = tonemap_scene(color, frame.scene_exposure, frame.tonemapper);
 	o_color = vec4(pow(max(color, 0.0), vec3(1.0 / 2.2)), obj.base_color.a);
 }
 #endif

@@ -93,6 +93,8 @@ namespace VortexEditor.Claude
                 {
                     var attr = m.GetCustomAttribute<McpServerToolAttribute>();
                     if (attr == null) continue;
+                    try
+                    {
                     string name = attr.Name ?? Snake(m.Name);
                     string desc = m.GetCustomAttribute<DescriptionAttribute>()?.Description ?? "";
                     var fn = AIFunctionFactory.Create(m, (object)null, new AIFunctionFactoryOptions
@@ -122,6 +124,13 @@ namespace VortexEditor.Claude
                         ManagesUndo = manages,
                         Function = fn,
                     });
+                    }
+                    catch (Exception ex)
+                    {
+                        // a tool whose schema cannot be built (a NaN default once crashed the editor at start) is left out, not fatal
+                        try { Editor.Core.Services.ConsoleService.Instance.LogError("MCP: the tool '" + m.Name + "' was skipped — " + ex.Message); } catch { }
+                        System.Diagnostics.Debug.WriteLine("[ToolCatalog] " + m.Name + ": " + ex);
+                    }
                 }
             }
             return list.OrderBy(t => t.Category, StringComparer.Ordinal).ThenBy(t => t.Name, StringComparer.Ordinal).ToList();

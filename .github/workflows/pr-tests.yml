@@ -117,6 +117,10 @@ jobs:
           if (-not $p.WaitForExit(420000)) { $p.Kill(); Write-Host "::warning::the editor smoke timed out" }
           Get-Content "$tmp\smoke.log" -ErrorAction SilentlyContinue
           Get-Content "$tmp\smoke.err" -ErrorAction SilentlyContinue
+          # the logs travel with the capture artifact: a failure can be read from the artifact alone (no job-log access needed)
+          New-Item -ItemType Directory -Force "$tmp\capture" | Out-Null
+          Copy-Item "$tmp\smoke.log" "$tmp\capture\smoke.log" -ErrorAction SilentlyContinue
+          Copy-Item "$tmp\smoke.err" "$tmp\capture\smoke.err" -ErrorAction SilentlyContinue
           if (Select-String -Path "$tmp\smoke.log" -Pattern "SMOKE FAIL" -Quiet) { exit 1 }
           foreach ($c in @("mcp tools", "title bar", "terminal", "workspace layout", "camera clip planes", "sky texture", "height fog", "material pipelines", "light priority", "tool arguments", "resource lifecycle", "cutout shadows", "instance tint", "import handedness", "jolt character", "behavior tree", "particles", "decals", "volumetric fog", "terrain", "foliage", "water")) { if (-not (Select-String -Path "$tmp\smoke.log" -Pattern "SMOKE OK   $c" -Quiet)) { Write-Host "::error::smoke check '$c' did not pass"; exit 1 } }
           if (-not (Select-String -Path "$tmp\smoke.log" -Pattern "Jolt world ready" -Quiet)) { Write-Host "::error::the editor ran with the physics stub — no 'Jolt world ready' in the smoke log (#182)"; exit 1 }

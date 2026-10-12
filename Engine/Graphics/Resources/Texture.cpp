@@ -19,10 +19,22 @@ namespace vortex::graphics
 		case TextureFormat::RG8_UNORM: return DXGI_FORMAT_R8G8_UNORM;
 		case TextureFormat::RGBA16_FLOAT: return DXGI_FORMAT_R16G16B16A16_FLOAT;
 		case TextureFormat::RGBA32_FLOAT: return DXGI_FORMAT_R32G32B32A32_FLOAT;
+		case TextureFormat::BC1_UNORM: return DXGI_FORMAT_BC1_UNORM;
+		case TextureFormat::BC3_UNORM: return DXGI_FORMAT_BC3_UNORM;
+		case TextureFormat::BC4_UNORM: return DXGI_FORMAT_BC4_UNORM;
+		case TextureFormat::BC5_UNORM: return DXGI_FORMAT_BC5_UNORM;
 		case TextureFormat::D24_UNORM_S8_UINT: return DXGI_FORMAT_D24_UNORM_S8_UINT;
 		case TextureFormat::D32_FLOAT: return DXGI_FORMAT_D32_FLOAT;
 		default: return DXGI_FORMAT_R8G8B8A8_UNORM;
 		}
+	}
+
+	u64 Texture::level_bytes(TextureFormat f, u32 w, u32 h)
+	{
+		if (is_block_format(f)) return (u64)((w + 3) / 4) * (u64)((h + 3) / 4) * ((f == TextureFormat::BC1_UNORM || f == TextureFormat::BC4_UNORM) ? 8u : 16u);
+		u32 bpp = 4;
+		switch (f) { case TextureFormat::R8_UNORM: bpp = 1; break; case TextureFormat::RG8_UNORM: bpp = 2; break; case TextureFormat::RGBA16_FLOAT: bpp = 8; break; case TextureFormat::RGBA32_FLOAT: bpp = 16; break; default: break; }
+		return (u64)w * h * bpp;
 	}
 
 	bool Texture::create(ID3D12Device* device, const TextureDesc& desc, const void* data)
@@ -37,7 +49,7 @@ namespace vortex::graphics
 
 		DXGI_FORMAT dxgi_format = to_dxgi_format(desc.format);
 
-		u32 bytes_per_pixel = 4;
+		u32 bytes_per_pixel = 4;   // (the upload reads the subresource row sizes; kept for the plain path's bookkeeping)
 		switch (desc.format)
 		{
 		case TextureFormat::R8_UNORM: bytes_per_pixel = 1; break;
@@ -54,7 +66,9 @@ namespace vortex::graphics
 			desc.format == TextureFormat::BGRA8_UNORM;
 
 		u32 mip_count = 1;
-		if (desc.generate_mips && data && can_mip && !desc.is_render_target && !desc.is_depth_stencil)
+		const bool provided = desc.mip_count > 1 && data != nullptr;   // the caller built the chain (block formats, #179)
+		if (provided) mip_count = desc.mip_count;
+		else if (desc.generate_mips && data && can_mip && !desc.is_render_target && !desc.is_depth_stencil)
 		{
 			u32 dim = desc.width > desc.height ? desc.width : desc.height;
 			while (dim > 1) { dim >>= 1; ++mip_count; }
@@ -103,7 +117,17 @@ namespace vortex::graphics
 			level_data[0] = static_cast<const u8*>(data);
 			level_w[0] = desc.width;
 			level_h[0] = desc.height;
-			for (u32 m = 1; m < mip_count; ++m)
+			if (provided)
+			{
+				u64 off = 0; u32 lw = desc.width, lh = desc.height;
+				for (u32 m = 0; m < mip_count; ++m)
+				{
+					level_data[m] = static_cast<const u8*>(data) + off; level_w[m] = lw; level_h[m] = lh;
+					off += level_bytes(desc.format, lw, lh);
+					lw = lw > 1 ? lw >> 1 : 1; lh = lh > 1 ? lh >> 1 : 1;
+				}
+			}
+			for (u32 m = 1; m < mip_count && !provided; ++m)
 			{
 				const u32 sw = level_w[m - 1], sh = level_h[m - 1];
 				const u32 dw = sw > 1 ? sw >> 1 : 1;
@@ -167,7 +191,7 @@ namespace vortex::graphics
 			{
 				for (u32 m = 0; m < mip_count; ++m)
 				{
-					const u32 src_row_pitch = level_w[m] * bytes_per_pixel;
+					const size_t src_row_pitch = (size_t)row_sizes[m];   // bytes per row of the subresource (a block row for BCn)
 					u8* dst = static_cast<u8*>(mapped) + footprints[m].Offset;
 					const u8* src = level_data[m];
 					for (UINT row = 0; row < num_rows[m]; ++row)

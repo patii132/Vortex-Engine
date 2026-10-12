@@ -11,8 +11,11 @@ layout(set = SET_UNIFORM, binding = 0, std140) uniform SkyboxConstants
 	vec3  horizon_color;   float padding2;      // @96
 	vec3  ground_color;    float padding3;      // @112
 	vec3  sun_direction;   float sun_intensity; // @128
-	vec3  sun_color;       float padding4;      // @144
+	vec3  sun_color;       float tonemapper;    // @144  the HDR path's curve: 0 = ACES fit, 1 = PBR Neutral
 	vec4  params;                               // @160 x: 1 = sample the equirect texture (#326), y: exposure, z: yaw offset
+	vec4  haze;                                 // @176 aerial perspective on the HDR sky: rgb fog colour, w density (0 = off)
+	vec4  glow_dir;                             // @192 xyz the direction the sun's light travels, w the fog's sun glow
+	vec4  glow_color;                           // @208 rgb the sun's colour
 } c;
 
 #endif

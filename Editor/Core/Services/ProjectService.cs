@@ -492,6 +492,8 @@ namespace Editor.Core.Services
                 scene.FilePath = Path.Combine(scenesPath, $"{SanitizeFileName(scene.Name)}.vscene");
             }
 
+            // the editor's view travels with the scene (see EditorViewState)
+            try { if (ReferenceEquals(project.ActiveScene, scene)) EditorViewState.Capture(scene); } catch { }
             // Speichere Szene als Bin�r
             DataSerializer.SaveAsBinary(scene, scene.FilePath);
             scene.IsDirty = false;

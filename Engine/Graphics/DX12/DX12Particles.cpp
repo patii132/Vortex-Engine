@@ -106,6 +106,7 @@ namespace vortex::graphics::dx12
 		m_root_signature.Reset();
 		m_vs_particle.Reset(); m_vs_ribbon.Reset(); m_ps_particle.Reset(); m_vs_snap.Reset(); m_ps_snap.Reset();
 		for (auto& c : m_depth_copies) { c.texture.Reset(); c.w = c.h = 0; c.state = D3D12_RESOURCE_STATE_COPY_DEST; }   // the SRV slots stay reserved
+		for (auto& c : m_color_copies) { c.texture.Reset(); c.w = c.h = 0; c.format = DXGI_FORMAT_UNKNOWN; c.state = D3D12_RESOURCE_STATE_COPY_DEST; }
 		m_snap_texture.Reset();
 		m_snap_rtv_heap.Reset();
 		m_snap_w = m_snap_h = 0;
@@ -320,6 +321,78 @@ namespace vortex::graphics::dx12
 		return dc ? dc->gpu : D3D12_GPU_DESCRIPTOR_HANDLE{};
 	}
 
+	// The colour target so far, copied for the transparent pass (#200): same size + format as the source (typeless
+	// sources get the matching typed SRV), one entry per size/format, the SRV slot reserved once like the depth copies.
+	DX12Particles::DepthCopy* DX12Particles::copy_color(ID3D12GraphicsCommandList* cmd, ID3D12Resource* color)
+	{
+		if (!cmd || !color || !m_ring) return nullptr;
+		const D3D12_RESOURCE_DESC dd = color->GetDesc();
+		const u32 w = (u32)dd.Width, h = (u32)dd.Height;
+		if (w == 0 || h == 0 || dd.SampleDesc.Count != 1) return nullptr;
+		DXGI_FORMAT srv_format = dd.Format;
+		switch (dd.Format)
+		{
+		case DXGI_FORMAT_R8G8B8A8_TYPELESS: srv_format = DXGI_FORMAT_R8G8B8A8_UNORM; break;
+		case DXGI_FORMAT_B8G8R8A8_TYPELESS: srv_format = DXGI_FORMAT_B8G8R8A8_UNORM; break;
+		case DXGI_FORMAT_R16G16B16A16_TYPELESS: srv_format = DXGI_FORMAT_R16G16B16A16_FLOAT; break;
+		case DXGI_FORMAT_R10G10B10A2_TYPELESS: srv_format = DXGI_FORMAT_R10G10B10A2_UNORM; break;
+		case DXGI_FORMAT_R32G32B32A32_TYPELESS: srv_format = DXGI_FORMAT_R32G32B32A32_FLOAT; break;
+		case DXGI_FORMAT_R11G11B10_FLOAT: case DXGI_FORMAT_R16G16B16A16_FLOAT: case DXGI_FORMAT_R8G8B8A8_UNORM: case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+		case DXGI_FORMAT_B8G8R8A8_UNORM: case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: case DXGI_FORMAT_R10G10B10A2_UNORM: case DXGI_FORMAT_R32G32B32A32_FLOAT: break;
+		default: return nullptr;   // not a colour format we know how to view
+		}
+		DepthCopy* e = nullptr;
+		for (auto& c : m_color_copies) if (c.texture && c.w == w && c.h == h && c.format == dd.Format) { e = &c; break; }
+		if (!e)
+		{
+			for (auto& c : m_color_copies) if (!c.texture) { e = &c; break; }
+			if (!e) { e = &m_color_copies[0]; for (auto& c : m_color_copies) if (c.last_used < e->last_used) e = &c; }
+			if (e->texture) { m_ring->retire(e->texture); e->texture.Reset(); }
+			if (!e->slot)
+			{
+				if (!ResourceRegistry::instance().reserve_srv_slot(e->cpu, e->gpu)) { log("no SRV slot for the colour copy"); return nullptr; }
+				e->slot = true;
+			}
+			D3D12_HEAP_PROPERTIES hp{};
+			hp.Type = D3D12_HEAP_TYPE_DEFAULT;
+			D3D12_RESOURCE_DESC rd{};
+			rd.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+			rd.Width = w; rd.Height = h;
+			rd.DepthOrArraySize = 1; rd.MipLevels = 1;
+			rd.Format = dd.Format;
+			rd.SampleDesc.Count = 1;
+			rd.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+			if (FAILED(m_device->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&e->texture))))
+			{
+				log("colour copy allocation failed (" + std::to_string(w) + "x" + std::to_string(h) + ")");
+				return nullptr;
+			}
+			e->w = w; e->h = h; e->format = dd.Format;
+			e->state = D3D12_RESOURCE_STATE_COPY_DEST;
+			D3D12_SHADER_RESOURCE_VIEW_DESC sd{};
+			sd.Format = srv_format;
+			sd.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+			sd.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+			sd.Texture2D.MipLevels = 1;
+			m_device->CreateShaderResourceView(e->texture.Get(), &sd, e->cpu);
+		}
+		e->last_used = m_frame;
+		barrier(cmd, color, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
+		barrier(cmd, e->texture.Get(), e->state, D3D12_RESOURCE_STATE_COPY_DEST);
+		cmd->CopyResource(e->texture.Get(), color);
+		barrier(cmd, e->texture.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+		e->state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+		barrier(cmd, color, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+		return e;
+	}
+
+	D3D12_GPU_DESCRIPTOR_HANDLE DX12Particles::scene_color_srv(ID3D12GraphicsCommandList* cmd, ID3D12Resource* color)
+	{
+		DepthCopy* cc = m_device ? copy_color(cmd, color) : nullptr;
+		m_last_scene_color = cc;
+		return cc ? cc->gpu : D3D12_GPU_DESCRIPTOR_HANDLE{};
+	}
+
 	// ---------------------------------------------------------------------------------------------------------
 	// per view
 	// ---------------------------------------------------------------------------------------------------------
@@ -387,10 +460,10 @@ namespace vortex::graphics::dx12
 		f.depth_params[1] = layer == 0 ? view.far_clip : view.vm_far_clip;
 		f.depth_params[2] = (layer == 0 && view.ortho) ? 1.0f : 0.0f;
 		f.fog[0] = env.fog_color.x; f.fog[1] = env.fog_color.y; f.fog[2] = env.fog_color.z; f.fog[3] = env.fog_density;
-		f.fog2[0] = env.fog_height_y; f.fog2[1] = env.fog_height_falloff;
+		f.fog2[0] = env.fog_height_y; f.fog2[1] = env.fog_height_falloff; f.fog2[2] = env.scene_exposure; f.fog2[3] = env.fog_sun_glow;
 		f.sun_dir[0] = env.sun_direction.x; f.sun_dir[1] = env.sun_direction.y; f.sun_dir[2] = env.sun_direction.z; f.sun_dir[3] = env.sun_intensity;
 		f.sun_color[0] = env.sun_color.x; f.sun_color[1] = env.sun_color.y; f.sun_color[2] = env.sun_color.z; f.sun_color[3] = env.ambient;
-		f.counts[0] = lights ? env.point_lights : 0; f.counts[1] = lights ? env.spot_lights : 0;
+		f.counts[0] = lights ? env.point_lights : 0; f.counts[1] = lights ? env.spot_lights : 0; f.counts[2] = env.tonemapper;
 		DX12FrameRing::Upload fcb = m_ring->alloc(sizeof(PFrame));
 		if (!fcb.cpu) return;
 		std::memcpy(fcb.cpu, &f, sizeof(f));

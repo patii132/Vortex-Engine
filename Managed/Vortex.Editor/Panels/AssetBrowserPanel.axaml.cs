@@ -918,6 +918,15 @@ namespace VortexEditor.Panels
                 case AssetKind.BuiltInTexture:
                     t.Thumbnail = BuiltInSwatches.For(t.FullPath);
                     return;
+                case AssetKind.Terrain:
+                case AssetKind.Foliage:
+                    // the world data files (#124 / #125): a shaded relief of the heights, a map of the painted instances
+                    WorldThumbs.Request(t.FullPath, Math.Max(96, size), (bmp, tip) =>
+                    {
+                        if (bmp != null) t.Thumbnail = bmp;
+                        if (tip != null) t.ToolTip = Path.GetFileName(t.FullPath) + "\n" + tip + "\n" + t.RelPath;
+                    });
+                    return;
             }
             if (ThumbnailService.KindOf(t.FullPath) == ThumbnailService.Kind.None) return;
             var hit = ThumbnailService.TryGet(t.FullPath, size);
@@ -1136,6 +1145,7 @@ namespace VortexEditor.Panels
             { EditorCommands.Toast(tile.Name + " is a built-in " + (tile.Kind == AssetKind.BuiltInMaterial ? "material" : "texture") + " (read-only)"); return; }
             bool shift = mods.HasFlag(KeyModifiers.Shift);
             bool cmd = mods.HasFlag(KeyModifiers.Meta) || mods.HasFlag(KeyModifiers.Control);
+            if (tile.Kind == AssetKind.Terrain || tile.Kind == AssetKind.Foliage) { SelectWorldDataUser(tile); return; }
             bool handled = false;
             try
             {
@@ -1399,9 +1409,30 @@ namespace VortexEditor.Panels
 
         /// <summary>A thumbnail was invalidated (asset changed, reimport, material edit): tiles of that asset that are
         /// on screen load it again; off-screen ones reload when they scroll into view.</summary>
+        /// <summary>A .vterrain / .vfoliage opens as its entity: select and frame the Terrain / Foliage that uses it (the sculpt and
+        /// paint tools live in its inspector); a file no entity uses says how to put it into the scene.</summary>
+        private void SelectWorldDataUser(AssetTile tile)
+        {
+            var user = WorldThumbs.UserOf(tile.FullPath);
+            bool terrain = tile.Kind == AssetKind.Terrain;
+            if (user == null)
+            {
+                EditorCommands.Toast("No " + (terrain ? "Terrain" : "Foliage") + " in the open scene uses " + tile.Name + " — Create ▸ " + (terrain ? "Terrain" : "Foliage") + ", then pick it as the data file");
+                return;
+            }
+            try
+            {
+                SelectionService.Instance.SelectedEntity = user;
+                SelectionService.Instance.RequestFocus(user);
+                EditorCommands.Toast((terrain ? "Terrain" : "Foliage") + " \"" + user.Name + "\" selected — " + (terrain ? "sculpt, paint, import and export in the Inspector" : "paint and erase with the brush in the Inspector"));
+            }
+            catch (Exception ex) { EditorCommands.Fail("Select", ex); }
+        }
+
         private void OnThumbnailInvalidated(string fullPath)
         {
             if (!Dispatcher.UIThread.CheckAccess()) { Dispatcher.UIThread.Post(() => OnThumbnailInvalidated(fullPath)); return; }
+            if (WorldThumbs.Handles(fullPath)) WorldThumbs.Forget(fullPath);
             foreach (var t in _tiles)
             {
                 if (!AssetFileOps.PathsEqual(t.FullPath, fullPath)) continue;
@@ -1867,6 +1898,12 @@ namespace VortexEditor.Panels
                         break;
                     case AssetKind.AnimationClip:
                         m.Items.Add(Mi("Open in Animation Editor", () => EditorWindows.AnimationEditor(p), "Play"));
+                        break;
+                    case AssetKind.Terrain:
+                        m.Items.Add(Mi("Select Terrain in Scene", () => SelectWorldDataUser(tile), "World", gestureText: "double-click"));
+                        break;
+                    case AssetKind.Foliage:
+                        m.Items.Add(Mi("Select Foliage in Scene", () => SelectWorldDataUser(tile), "Layers", gestureText: "double-click"));
                         break;
                     case AssetKind.UiScreen:
                         m.Items.Add(Mi("Open in UI Editor", () => EditorWindows.UiEditor(p), "LayoutSingle"));

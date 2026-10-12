@@ -12,6 +12,9 @@ namespace VortexEditor
         [STAThread]
         public static int Main(string[] args)
         {
+            // first of all: an unhandled exception anywhere below (and in the module initialisers that run before Main's
+            // first line resolves them) is logged before the process goes
+            Shell.CrashGuard.Install();
             Options = LaunchOptions.Parse(args);
             // docs: the generated Claude tool reference (no UI, no engine)
             foreach (var a in args ?? Array.Empty<string>())
@@ -28,8 +31,7 @@ namespace VortexEditor
             // WPF editor holds the same name; the mutex only has to exist while an editor runs)
             if (OperatingSystem.IsWindows()) { try { _installerMutex = new System.Threading.Mutex(false, "VortexEngineSingleInstance"); } catch { } }
             if (Options.SmokeSeconds > 0) AppDomain.CurrentDomain.ProcessExit += (s, e) => Stage("process exit");
-            // An exception in a pointer/key/window handler must not take the editor (and unsaved work) down.
-            Shell.CrashGuard.Install();
+            // An exception in a pointer/key/window handler must not take the editor (and unsaved work) down (hooks installed above).
             int code = Shell.CrashGuard.Run(BuildAvaloniaApp(), args);
             Stage("the UI ended (exit code " + code + ")");
             if (OperatingSystem.IsWindows()) EndProcessNow(code);

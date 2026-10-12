@@ -72,6 +72,35 @@ namespace Editor.Core.Data
         [DataMember(Name = "volAmbient", Order = 79)] public float VolumetricAmbient { get; set; } = 0.35f;
         [DataMember(Name = "volSteps", Order = 80)] public int VolumetricSteps { get; set; } = 24;
         [DataMember(Name = "volShadows", Order = 81)] public bool VolumetricShadows { get; set; } = true;
+        // ---- Exposure + aerial perspective ----
+        /// <summary>Scene exposure in stops BEFORE the tonemapper (the camera's aperture): 0 = the classic look, +1 doubles the
+        /// light the ACES curve receives. Unlike the grading exposure it brightens without clipping — a sunlit desert wants +1.5…+2.5.</summary>
+        [DataMember(Name = "sceneExposure", Order = 82)] public float SceneExposure { get; set; }
+        /// <summary>The sun's forward-scatter glow in the fog when looking towards it (0 = the flat fog colour; 0.3–0.6 a desert
+        /// noon, 1–2 a low sun).</summary>
+        [DataMember(Name = "fogSunGlow", Order = 83)] public float FogSunGlow { get; set; }
+        /// <summary>0 = the ACES fit (the classic look; bright saturated colours drift towards white), 1 = Khronos PBR Neutral
+        /// (hue-preserving — a sunlit desert stays orange, a red car red).</summary>
+        [DataMember(Name = "tonemapper", Order = 84)] public int Tonemapper { get; set; }
+        /// <summary>FXAA on the final picture (nine taps, no history): smooth edges on fronds, grass and ripples. Off = the picture as rendered.</summary>
+        [DataMember(Name = "aaOn", Order = 85)] public bool AntiAliasEnabled { get; set; }
+        // ---- Ground bounce: the sun's light bounced off the ground into the shadows (a warm lower hemisphere in the sky light) ----
+        [DataMember(Name = "bounceStrength", Order = 86)] public float BounceStrength { get; set; }
+        [DataMember(Name = "bounceR", Order = 87)] public float BounceR { get; set; } = 0.55f;
+        [DataMember(Name = "bounceG", Order = 88)] public float BounceG { get; set; } = 0.40f;
+        [DataMember(Name = "bounceB", Order = 89)] public float BounceB { get; set; } = 0.26f;
+        // ---- Global illumination (#257): step 1 = screen space (one bounce traced in the SSAO pass; needs SSAO on) ----
+        [DataMember(Name = "giOn", Order = 90)] public bool GiEnabled { get; set; }
+        [DataMember(Name = "giStrength", Order = 91)] public float GiStrength { get; set; } = 1.0f;
+        [DataMember(Name = "giRadius", Order = 92)] public float GiRadius { get; set; } = 2.5f;
+        // ---- The editor's view (EditorViewState): where the scene camera stood when the scene was saved — a scene opens there,
+        // Home returns there. Editor data only; a scene saved before this has none (viewSet false) and starts at the classic default. ----
+        [DataMember(Name = "viewSet", Order = 100)] public bool EditorViewSet { get; set; }
+        [DataMember(Name = "viewX", Order = 101)] public float EditorViewX { get; set; }
+        [DataMember(Name = "viewY", Order = 102)] public float EditorViewY { get; set; }
+        [DataMember(Name = "viewZ", Order = 103)] public float EditorViewZ { get; set; }
+        [DataMember(Name = "viewYaw", Order = 104)] public float EditorViewYaw { get; set; }
+        [DataMember(Name = "viewPitch", Order = 105)] public float EditorViewPitch { get; set; }
 
         /// <summary>DataContractSerializer builds an UNINITIALIZED object (field initializers never
         /// run), so members missing from an older .vscene would deserialize as 0 — a scene saved
@@ -81,6 +110,8 @@ namespace Editor.Core.Data
         private void RestoreDefaults(StreamingContext context)
         {
             FogDensity = 0.08f; FogR = 0.02f; FogG = 0.025f; FogB = 0.035f;
+            BounceR = 0.55f; BounceG = 0.40f; BounceB = 0.26f;
+            GiStrength = 1.0f; GiRadius = 2.5f;
             VignetteIntensity = 0.8f; VignetteSmoothness = 0.5f; VignetteRoundness = 1.0f;
             GrainIntensity = 0.35f; GrainSize = 1.6f;
             CaStrength = 0.35f; CaFalloff = 1.2f;
@@ -96,6 +127,10 @@ namespace Editor.Core.Data
         {
             DllWrapper.VortexAPI.SetFog(FogR, FogG, FogB, FogEnabled ? FogDensity : 0f,
                 FogHeightY, FogHeightFalloff);
+            DllWrapper.VortexAPI.SetSceneExposureStops(SceneExposure);
+            DllWrapper.VortexAPI.SetTonemapperMode(Tonemapper);
+            DllWrapper.VortexAPI.SetPostAntiAlias(AntiAliasEnabled);
+            DllWrapper.VortexAPI.SetFogSunGlowStrength(FogEnabled ? FogSunGlow : 0f);
             DllWrapper.VortexAPI.SetPostVignette(VignetteEnabled, VignetteIntensity, VignetteSmoothness,
                 VignetteRoundness, VignetteR, VignetteG, VignetteB);
             DllWrapper.VortexAPI.SetPostGrain(GrainEnabled, GrainIntensity, GrainSize);
@@ -103,6 +138,8 @@ namespace Editor.Core.Data
             DllWrapper.VortexAPI.SetPostColorGrade(GradeEnabled, Exposure, Contrast, Saturation, Temperature, Tint);
             DllWrapper.VortexAPI.SetPostBloom(BloomEnabled, BloomThreshold, BloomKnee, BloomIntensity, BloomScatter);
             DllWrapper.VortexAPI.SetAmbientOcclusion(AoEnabled, AoRadius, AoIntensity);
+            DllWrapper.VortexAPI.SetGlobalIllumination(GiEnabled && AoEnabled, GiStrength, GiRadius);
+            DllWrapper.VortexAPI.SetGlobalIlluminationBounce(BounceR, BounceG, BounceB, true);   // the sunlit ground's colour for the shadow-map bounce (#257 step 2)
             DllWrapper.VortexAPI.SetVolumetricFog(VolumetricEnabled, VolumetricDensity, VolumetricAnisotropy, VolumetricDistance, VolumetricNoise,
                 VolumetricNoiseScale, VolumetricNoiseSpeed, VolumetricSun, VolumetricLights, VolumetricAmbient, VolumetricSteps, VolumetricShadows);
         }

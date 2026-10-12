@@ -37,12 +37,14 @@ namespace vortex::graphics::dx12
 	// SSAO (#32): the standard PS samples t10 only when this is set; if a view's record_ssao
 	// can't run, its reserved t10 slot still holds a valid (stale/neutral) texture.
 	m_frame_constants.ssao_enabled = (m_ssao_enabled && m_ssao_pso) ? 1.0f : 0.0f;
+	m_frame_constants.gi_strength = (m_ssao_enabled && m_ssao_pso && m_gi_enabled) ? m_gi_strength : 0.0f;   // screen-space GI rides the AO texture
 	{
 		const float env_on = (m_skybox_enabled && (m_skybox_mode == SkyboxMode::Gradient || m_skybox_mode == SkyboxMode::Texture)) ? 1.0f : 0.0f;
 		const bool env_map = env_on > 0.5f && m_env_map != id::invalid_id && m_env_mips > 0;
 		m_frame_constants.env_sky = XMFLOAT4(m_env_sky.x, m_env_sky.y, m_env_sky.z, env_map ? 2.0f : env_on);   // 2 = a reflection map is bound at t11
 		m_frame_constants.env_horizon = XMFLOAT4(m_env_horizon.x, m_env_horizon.y, m_env_horizon.z, env_map ? (float)m_env_mips : 0.0f);
 		m_frame_constants.env_ground = XMFLOAT4(m_env_ground.x, m_env_ground.y, m_env_ground.z, 0.0f);
+		m_frame_constants.camera_clip = XMFLOAT4(m_near_clip, m_far_clip, 0.0f, 0.0f);
 	}
 
 	// Spot shadows (#23): select the shadow-casting spot + fill the shadow fields BEFORE the upload
@@ -155,7 +157,7 @@ namespace vortex::graphics::dx12
 			CSM_CASCADES > 2 ? m_csm_splits[2] : 0.0f,
 			m_dir_shadow_distance };
 		memcpy(csm_ptr + (size_t)CSM_CASCADES * 64, splits, 16);
-		float params[4] = { m_dir_shadow_strength, m_dir_shadow_bias, (float)m_csm_count, 0.0f };
+		float params[4] = { m_dir_shadow_strength, m_dir_shadow_bias, (float)m_csm_count, m_dir_shadow_softness };   // w = PCF radius (texels)
 		memcpy(csm_ptr + (size_t)CSM_CASCADES * 64 + 16, params, 16);
 
 		// Point shadow tail (#25) @1504: PointShadows[2] entries + PointFaceVP[12] — byte-matched

@@ -283,7 +283,7 @@ namespace vortex::graphics::sdlgpu
 		for (auto& m : L.cascade_vp) m = ident;
 		for (auto& m : L.point_face_vp) m = ident;
 		L.point_shadows[0] = L.point_shadows[1] = { -1.0f, 0.0f, 0.0f, 0.0f };
-		L.dir_shadow_params = { m_dir_shadow_strength, m_dir_shadow_bias, 0.0f, 0.0f };
+		L.dir_shadow_params = { m_dir_shadow_strength, m_dir_shadow_bias, 0.0f, m_dir_shadow_softness };
 		L.cascade_splits = { 0.0f, 0.0f, 0.0f, m_dir_shadow_distance };
 		fill_sky_light(L);
 	}
@@ -312,6 +312,7 @@ namespace vortex::graphics::sdlgpu
 		v.frame.point_light_count = (u32)(std::min)(m_point_lights.size(), (size_t)MAX_POINT_LIGHTS);
 		v.frame.spot_light_count = (u32)(std::min)(m_spot_lights.size(), (size_t)MAX_SPOT_LIGHTS);
 		v.frame.ssao_enabled = 0.0f;
+		v.frame.gi_strength = 0.0f;
 		fill_environment(v.frame);
 		v.frame.shadow_map_texel = 1.0f / (float)SHADOW_TILE_SIZE;
 		v.eye = m_camera_position;
@@ -321,6 +322,7 @@ namespace vortex::graphics::sdlgpu
 		XMStoreFloat4x4(&v.viewmodel.view_projection, view * vm_proj);
 		camera_basis(m_camera_position, m_camera_target, m_camera_up, v.right, v.up, v.forward);
 		v.near_clip = m_near_clip; v.far_clip = m_far_clip; v.ortho = false;
+		v.frame.camera_clip = { v.near_clip, v.far_clip, 0.0f, 0.0f };
 		v.tan_half_y = tanf(XMConvertToRadians(m_fov_degrees) * 0.5f);
 		v.tan_half_x = v.tan_half_y * aspect;
 		fill_light_buffer();
@@ -353,12 +355,14 @@ namespace vortex::graphics::sdlgpu
 		v.frame.point_light_count = (u32)(std::min)(m_point_lights.size(), (size_t)MAX_POINT_LIGHTS);
 		v.frame.spot_light_count = (u32)(std::min)(m_spot_lights.size(), (size_t)MAX_SPOT_LIGHTS);
 		v.frame.ssao_enabled = 0.0f;
+		v.frame.gi_strength = 0.0f;
 		fill_environment(v.frame);
 		v.frame.shadow_map_texel = 1.0f / (float)SHADOW_TILE_SIZE;
 		v.eye = camera.position;
 		v.viewmodel = v.frame;
 		camera_basis(camera.position, camera.target, camera.up, v.right, v.up, v.forward);
 		v.near_clip = camera.near_clip; v.far_clip = camera.far_clip; v.ortho = camera.orthographic;
+		v.frame.camera_clip = { v.near_clip, v.far_clip, 0.0f, 0.0f };
 		if (camera.orthographic) { v.tan_half_y = camera.ortho_size * 0.5f; v.tan_half_x = v.tan_half_y * aspect; }
 		else { v.tan_half_y = tanf(XMConvertToRadians(camera.fov_degrees) * 0.5f); v.tan_half_x = v.tan_half_y * aspect; }
 		fill_light_buffer();
@@ -630,6 +634,7 @@ namespace vortex::graphics::sdlgpu
 		const PerFrameConstants& f = view.frame;
 		e.fog_color = f.fog_color; e.fog_density = f.fog_density;
 		e.fog_height_y = f.fog_height_y; e.fog_height_falloff = f.fog_height_falloff;
+		e.scene_exposure = f.scene_exposure > 0.0f ? f.scene_exposure : 0.5f; e.fog_sun_glow = f.fog_sun_glow; e.tonemapper = f.tonemapper;
 		e.sun_direction = f.light_direction; e.sun_intensity = f.directional_intensity;
 		e.sun_color = f.light_color; e.ambient = f.ambient_strength;
 		e.point_lights = f.point_light_count; e.spot_lights = f.spot_light_count;
@@ -647,6 +652,9 @@ namespace vortex::graphics::sdlgpu
 		view.frame.ssao_padding[0] = 1.0f / (float)(target.width ? target.width : 1);
 		view.frame.ssao_padding[1] = 1.0f / (float)(target.height ? target.height : 1);
 		view.viewmodel.ssao_enabled = 0.0f;   // the first-person layer has no AO (own projection)
+		// screen-space GI (#257 step 1): only where the previous frame's copy exists at this size (the main view)
+		view.frame.gi_strength = (ssao_on && m_gi_enabled && m_gi_prev_valid && m_gi_prev_w == target.width && m_gi_prev_h == target.height) ? m_gi_strength : 0.0f;
+		view.viewmodel.gi_strength = 0.0f;
 		prepare_scene(view);
 		prepare_shadow_pass(view);
 		upload_dynamic(cmd);
@@ -705,16 +713,22 @@ namespace vortex::graphics::sdlgpu
 		if (draw_grid_pass) draw_grid(pass, cmd, view);
 		// The skybox/grid pushed their own constants into uniform slot 0 — the scene shaders read PerFrame there.
 		push_frame_uniforms(cmd, view.frame);
-		if (dx)
 		{
-			// opaque meshes, then the decal pass (it samples the depth, so it needs a pass of its own), then the transparent
+			// opaque meshes, then the decal pass (it samples the depth, so it needs a pass of its own), then a copy of the
+			// colour + depth so far for the water's refraction / screen-space reflections (#200), then the transparent
 			// meshes with colour + depth loaded
 			record_runs(pass, cmd, 0, vmStart, view, 1u);
 			SDL_EndGPURenderPass(pass);
-			SdlGpuDecals::View dv{};
-			dv.view_projection = view.view_projection; dv.inv_view_projection = view.inverse_view_projection; dv.eye = view.eye;
-			dv.near_clip = view.near_clip; dv.far_clip = view.far_clip; dv.ortho = view.ortho;
-			m_decals.draw(cmd, target.color, target.depth, target.width, target.height, dv, penv);
+			if (dx)
+			{
+				SdlGpuDecals::View dv{};
+				dv.view_projection = view.view_projection; dv.inv_view_projection = view.inverse_view_projection; dv.eye = view.eye;
+				dv.near_clip = view.near_clip; dv.far_clip = view.far_clip; dv.ortho = view.ortho;
+				m_decals.draw(cmd, target.color, target.depth, target.width, target.height, dv, penv);
+			}
+			m_scene_copy_valid = false;
+			if (m_transparent_runs_seen || (m_gi_enabled && !draw_gizmo_pass)) copy_scene_for_transparents(cmd, target);   // the GI pass reads it next frame
+			if (m_scene_copy_valid) { m_gi_prev_view_projection = view.view_projection; m_gi_prev_w = target.width; m_gi_prev_h = target.height; m_gi_prev_valid = true; }
 			color.load_op = SDL_GPU_LOADOP_LOAD;
 			depth.load_op = SDL_GPU_LOADOP_LOAD;
 			pass = SDL_BeginGPURenderPass(cmd, &color, 1, &depth);
@@ -723,7 +737,6 @@ namespace vortex::graphics::sdlgpu
 			push_frame_uniforms(cmd, view.frame);   // the decal pass left its own uniforms in the slots
 			record_runs(pass, cmd, 0, vmStart, view, 2u);
 		}
-		else record_runs(pass, cmd, 0, vmStart, view);
 		if (!vm_pass && gizmos && !fx0) draw_gizmos(pass, cmd);
 		SDL_EndGPURenderPass(pass);
 
@@ -772,10 +785,15 @@ namespace vortex::graphics::sdlgpu
 		c.camera_position = view.eye;
 		c.sky_color = m_sky_color; c.horizon_color = m_horizon_color; c.ground_color = m_ground_color;
 		c.sun_direction = m_sun_direction; c.sun_intensity = m_sun_intensity; c.sun_color = m_sun_color;
+		c.tonemapper = (float)m_frame_constants.tonemapper;
+		c.haze = { m_frame_constants.fog_color.x, m_frame_constants.fog_color.y, m_frame_constants.fog_color.z, m_frame_constants.fog_density };
+		c.glow_dir = { m_frame_constants.light_direction.x, m_frame_constants.light_direction.y, m_frame_constants.light_direction.z, m_frame_constants.fog_sun_glow };
+		c.glow_color = { m_frame_constants.light_color.x, m_frame_constants.light_color.y, m_frame_constants.light_color.z, 0.0f };
 		// the equirect map (#326) — or the white texture, so sampler slot 0 is always bound
 		auto& reg = ResourceRegistry::instance();
 		Texture* sky = (m_skybox_mode == SkyboxMode::Texture && m_sky_texture != id::invalid_id) ? reg.get_texture(m_sky_texture) : nullptr;
-		c.params = { sky ? 1.0f : 0.0f, m_sky_exposure, m_sky_rotation, 0.0f };
+		c.params = { sky ? 1.0f : 0.0f, m_sky_exposure, m_sky_rotation,
+			(sky && m_sky_hdr == 2) ? (m_frame_constants.scene_exposure > 0.0f ? m_frame_constants.scene_exposure : 0.5f) : ((sky && m_sky_hdr == 1) ? -1.0f : 0.0f) };   // w > 0: HDR sky tonemapped, w < 0: HDR sky the classic way
 		if (!sky) sky = reg.white_texture();
 		SDL_BindGPUGraphicsPipeline(pass, m_pipeline_skybox);
 		SDL_PushGPUVertexUniformData(cmd, 0, &c, sizeof(c));
@@ -809,7 +827,7 @@ namespace vortex::graphics::sdlgpu
 		auto& reg = ResourceRegistry::instance();
 		Texture* white = reg.white_texture();
 		SDL_GPUTexture* white_tex = white ? white->texture() : nullptr;
-		SDL_GPUTextureSamplerBinding bindings[11];
+		SDL_GPUTextureSamplerBinding bindings[13];
 		for (auto& b : bindings) { b.texture = white_tex; b.sampler = m_sampler_linear_wrap; }
 		bindings[9] = { m_ssao_current ? m_ssao_current : white_tex, m_sampler_linear_clamp };   // blurred SSAO (slot 9)
 		{
@@ -817,6 +835,10 @@ namespace vortex::graphics::sdlgpu
 			Texture* env = (m_env_map != id::invalid_id) ? reg.get_texture(m_env_map) : nullptr;
 			bindings[10] = { env && env->is_valid() && env->texture() ? env->texture() : white_tex, m_sampler_linear_wrap };
 		}
+		// the opaque colour + depth so far (slots 11 / 12, #200): water refraction + screen-space reflections; the white
+		// texture (1 px wide = "no copy" for the shader) and the shadow dummy before the transparent pass made the copies
+		bindings[11] = { (m_scene_copy_valid && m_scene_color_copy) ? m_scene_color_copy : white_tex, m_sampler_linear_clamp };
+		bindings[12] = { (m_scene_copy_valid && m_scene_depth_copy) ? m_scene_depth_copy : (m_shadow_dummy ? m_shadow_dummy : white_tex), m_sampler_point_clamp };
 		// Shadow atlases (slots 6..8) with the comparison sampler; the shaders only sample them when a light
 		// asks. A missing atlas falls back to the 1x1 depth texture, NOT to white_tex: these slots are declared
 		// as comparison-sampled depth textures, and a colour texture with a plain sampler is not a legal
@@ -857,7 +879,7 @@ namespace vortex::graphics::sdlgpu
 					if (t && t->is_valid()) { bindings[slot].texture = t->texture(); flag = packed ? packed : 1; }
 				};
 				bind(mat->albedo_texture(), 0, obj.has_albedo_texture, 1);
-				bind(mat->normal_texture(), 1, obj.has_normal_texture, 1);
+				bind(mat->normal_texture(), 1, obj.has_normal_texture, props.has_normal_texture);   // 2 = a two-channel (BC5) map, the shader rebuilds z
 				bind(mat->metallic_texture(), 2, obj.has_metallic_texture, props.has_metallic_texture);
 				bind(mat->roughness_texture(), 3, obj.has_roughness_texture, props.has_roughness_texture);
 				bind(mat->ao_texture(), 4, obj.has_ao_texture, props.has_ao_texture);
@@ -870,7 +892,7 @@ namespace vortex::graphics::sdlgpu
 		// buffer and never see slot 1; custom material vertex shaders are created with two (get_or_compile_pipeline).
 		// Skinned draws push their SkinParams into vertex slot 1 after this call, so they stay unaffected.
 		SDL_PushGPUVertexUniformData(cmd, 1, &obj, sizeof(PerObjectConstants));
-		SDL_BindGPUFragmentSamplers(pass, 0, bindings, 11);
+		SDL_BindGPUFragmentSamplers(pass, 0, bindings, 13);
 	}
 
 	void SdlGpuRenderer::draw_mesh(SDL_GPURenderPass* pass, Mesh* mesh, u32 instance_base, u32 instance_count)
@@ -972,6 +994,7 @@ namespace vortex::graphics::sdlgpu
 			}
 		}
 
+		m_transparent_runs_seen = (u32)transparentRuns.size();   // the opaque phase tells the pass whether to copy the scene for them (#200)
 		if (!(phase & 2u)) return;   // opaque phase only
 		// Sorted transparent pass: one draw per instance, farthest first, depth write off.
 		if (transparentRuns.empty()) return;
@@ -1040,5 +1063,40 @@ namespace vortex::graphics::sdlgpu
 		};
 		draw_list(m_gizmo_render, false);
 		draw_list(m_gizmo_wire_render, true);
+	}
+
+	// The opaque colour + depth so far (#200), copied once per world pass before the transparents so the water can refract
+	// what lies behind it and march the depth for screen-space reflections. Same size + format as the scene target.
+	void SdlGpuRenderer::copy_scene_for_transparents(SDL_GPUCommandBuffer* cmd, const GpuTarget& target)
+	{
+		m_scene_copy_valid = false;
+		if (!cmd || !m_device || !target.color || !target.depth || target.width == 0 || target.height == 0) return;
+		if (!m_scene_color_copy || !m_scene_depth_copy || m_scene_copy_w != target.width || m_scene_copy_h != target.height)
+		{
+			if (m_scene_color_copy) { SDL_ReleaseGPUTexture(m_device, m_scene_color_copy); m_scene_color_copy = nullptr; }
+			if (m_scene_depth_copy) { SDL_ReleaseGPUTexture(m_device, m_scene_depth_copy); m_scene_depth_copy = nullptr; }
+			SDL_GPUTextureCreateInfo ci{};
+			ci.type = SDL_GPU_TEXTURETYPE_2D;
+			ci.width = target.width; ci.height = target.height;
+			ci.layer_count_or_depth = 1; ci.num_levels = 1;
+			ci.sample_count = SDL_GPU_SAMPLECOUNT_1;
+			ci.format = m_scene_format;
+			ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+			m_scene_color_copy = SDL_CreateGPUTexture(m_device, &ci);
+			ci.format = m_depth_format;
+			ci.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+			m_scene_depth_copy = SDL_CreateGPUTexture(m_device, &ci);
+			m_scene_copy_w = target.width; m_scene_copy_h = target.height;
+			if (!m_scene_color_copy || !m_scene_depth_copy) { platform::debug_output(("[sdlgpu] scene copies for the transparent pass failed: " + std::string(SDL_GetError()) + "\n").c_str()); return; }
+		}
+		SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
+		if (!cp) return;
+		SDL_GPUTextureLocation src{}, dst{};
+		src.texture = target.color; dst.texture = m_scene_color_copy;
+		SDL_CopyGPUTextureToTexture(cp, &src, &dst, target.width, target.height, 1, false);
+		src.texture = target.depth; dst.texture = m_scene_depth_copy;
+		SDL_CopyGPUTextureToTexture(cp, &src, &dst, target.width, target.height, 1, false);
+		SDL_EndGPUCopyPass(cp);
+		m_scene_copy_valid = true;
 	}
 }

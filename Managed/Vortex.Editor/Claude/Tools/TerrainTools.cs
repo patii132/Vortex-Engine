@@ -115,6 +115,89 @@ namespace VortexEditor.Claude.Tools
             return new { terrain = SceneModel.ShortId(e), op = o, strokes = centres.Count, changed_samples = rect.Width * rect.Height, min_height = data.MinHeight, max_height = data.MaxHeight };
         }
 
+        [McpServerTool(Name = "generate_terrain", Destructive = false)]
+        [Description("Fills a terrain's heights from noise as a starting point: preset flat, hills, mountains, dunes, island or canyon, sized by amplitude (m) and " +
+                     "wavelength (m, the feature width / ridge spacing), on a base height, repeatable by seed. Replaces every height (the splat map stays); the chunks, " +
+                     "the collision and the data file update. One undo step.")]
+        public static object GenerateTerrain(
+            [Description("The terrain entity (id, name or path)")] string terrain,
+            [Description("flat, hills, mountains, dunes, island or canyon (default hills)")] string preset = "hills",
+            [Description("Height of the features in metres (default 40)")] float amplitude = 40f,
+            [Description("Width of the features in metres (default 120)")] float wavelength = 120f,
+            [Description("Height of flat ground (default 0)")] float base_height = 0f,
+            [Description("Noise seed (default 7)")] int seed = 7,
+            [Description("Only report")] bool dry_run = false)
+        {
+            var e = ResolveTerrain(terrain, 0f, 0f);
+            var t = e.GetComponent<Terrain>();
+            var shape = TerrainGenerator.ParsePreset(preset);
+            if (dry_run) return new { terrain = SceneModel.ShortId(e), preset = shape.ToString(), amplitude, wavelength, base_height, seed };
+            ReplaceAllHeights(e, "Generate terrain (" + shape + ")", d => TerrainGenerator.Generate(d, t.Size, shape, amplitude, wavelength, base_height, seed));
+            ToolContext.UndoLabel = "generate terrain " + e.Name;
+            return Info(e, t);
+        }
+
+        [McpServerTool(Name = "import_heightmap", Destructive = false)]
+        [Description("Reads a heightmap picture into a terrain: a PNG (8 / 16 bit grey or colour) or a RAW 16-bit square, resampled to the terrain's resolution, " +
+                     "black → low_height, white → high_height (metres). Replaces every height; the chunks, the collision and the data file update. One undo step.")]
+        public static object ImportHeightmap(
+            [Description("The terrain entity (id, name or path)")] string terrain,
+            [Description("Picture path (absolute, or relative to the project)")] string path,
+            [Description("Height of black in metres (default 0)")] float low_height = 0f,
+            [Description("Height of white in metres (default 100)")] float high_height = 100f,
+            [Description("Flip the picture top-to-bottom (its first row at +Z instead of the terrain's first row)")] bool flip = false,
+            [Description("Only report")] bool dry_run = false)
+        {
+            var e = ResolveTerrain(terrain, 0f, 0f);
+            var t = e.GetComponent<Terrain>();
+            string abs = TerrainService.ResolvePath(path) ?? throw new ToolError("path is required.");
+            if (!System.IO.File.Exists(abs)) throw new ToolError("No such file: " + abs);
+            HeightmapImage img;
+            try { img = HeightmapIO.Load(abs); }
+            catch (Exception ex) { throw new ToolError("Could not read the heightmap: " + ex.Message); }
+            float low = Math.Min(low_height, high_height), high = Math.Max(low_height, high_height);
+            if (high - low < 0.001f) high = low + 1f;
+            if (dry_run) return new { terrain = SceneModel.ShortId(e), picture = new { img.Width, img.Height, bits = img.BitDepth, img.Note }, low, high };
+            ReplaceAllHeights(e, "Import heightmap", d => HeightmapIO.Apply(d, img, low, high, flip));
+            ToolContext.UndoLabel = "import heightmap " + e.Name;
+            return new { terrain = SceneModel.ShortId(e), picture = new { img.Width, img.Height, bits = img.BitDepth, img.Note }, low, high, info = Info(e, t) };
+        }
+
+        [McpServerTool(Name = "export_heightmap", ReadOnly = true)]
+        [Description("Writes a terrain's heights as a heightmap file: a 16-bit grey PNG (.png) or RAW 16-bit (.raw / .r16), lowest height = black, highest = white. " +
+                     "For World Machine, Gaea, Blender, Photoshop… Returns the height range the picture spans.")]
+        public static object ExportHeightmap(
+            [Description("The terrain entity (id, name or path)")] string terrain,
+            [Description("Output path (.png, .raw or .r16; absolute, or relative to the project)")] string path)
+        {
+            var e = ResolveTerrain(terrain, 0f, 0f);
+            TerrainData data; float cell;
+            if (!TerrainService.TryGetData(e, out data, out cell)) throw new ToolError("The terrain has no data.");
+            string abs = TerrainService.ResolvePath(path) ?? throw new ToolError("path is required.");
+            string ext = System.IO.Path.GetExtension(abs).ToLowerInvariant();
+            if (ext != ".png" && ext != ".raw" && ext != ".r16") throw new ToolError("path must end in .png, .raw or .r16.");
+            float low, high;
+            var bytes = ext == ".png" ? HeightmapIO.ToPng16(data, out low, out high) : HeightmapIO.ToRaw16(data, out low, out high);
+            var dir = System.IO.Path.GetDirectoryName(abs);
+            if (!string.IsNullOrEmpty(dir)) System.IO.Directory.CreateDirectory(dir);
+            System.IO.File.WriteAllBytes(abs, bytes);
+            return new { terrain = SceneModel.ShortId(e), file = abs, resolution = data.Resolution, black_height = low, white_height = high, bytes = bytes.Length };
+        }
+
+        /// <summary>Replace every height of a terrain as one undo step: rebuild the chunks, the collision and the data file.</summary>
+        private static void ReplaceAllHeights(GameEntity e, string label, Action<TerrainData> fill)
+        {
+            TerrainData data; float cell;
+            if (!TerrainService.TryGetData(e, out data, out cell)) throw new ToolError("The terrain has no data.");
+            var before = (float[])data.Heights.Clone();
+            fill(data);
+            var after = (float[])data.Heights.Clone();
+            var all = new SampleRect { X0 = 0, Z0 = 0, X1 = data.Resolution - 1, Z1 = data.Resolution - 1 };
+            void Put(float[] h) { Array.Copy(h, data.Heights, h.Length); data.MarkChanged(); TerrainService.MarkDirty(e, all, true, false); TerrainService.Save(e); Editor.Core.Viewport.EditorViewportSession.RequestResubmit(); }
+            Editor.Core.UndoRedo.UndoRedoManager.Instance.Execute(new Editor.Core.UndoRedo.Commands.ActionCommand(label, () => Put(after), () => Put(before)), false);
+            Put(after);
+        }
+
         [McpServerTool(Name = "paint_terrain_layer", Destructive = false)]
         [Description("Paints one of the terrain's four texture layers (1–4) with a brush at world points: strength 0..1 moves the splat weight onto that layer. One undo step.")]
         public static object PaintTerrainLayer(

@@ -97,7 +97,26 @@ namespace vortex::graphics
 	}
 
 
-	id::id_type ResourceRegistry::create_texture_from_image(ImageData& image_data, const std::string& label)
+	id::id_type ResourceRegistry::create_texture_compressed(const CompressedTexture& ct, const std::string& label)
+	{
+		if (!m_device || ct.data.empty() || ct.mip_count == 0) return id::invalid_id;
+		TextureDesc desc;
+		desc.width = ct.width; desc.height = ct.height;
+		desc.mip_count = ct.mip_count;
+		switch (ct.format)
+		{
+		case BlockFormat::BC1: desc.format = TextureFormat::BC1_UNORM; break;
+		case BlockFormat::BC3: desc.format = TextureFormat::BC3_UNORM; break;
+		case BlockFormat::BC4: desc.format = TextureFormat::BC4_UNORM; break;
+		default: desc.format = TextureFormat::BC5_UNORM; break;
+		}
+		VORTEX_VLOG(("texture " + label + ": " + std::to_string(ct.width) + "x" + std::to_string(ct.height) + " " + TextureCompress::format_name(ct.format)
+			+ " " + std::to_string(ct.data.size() / 1024) + " KB with " + std::to_string(ct.mip_count) + " mips (RGBA8 would be "
+			+ std::to_string((size_t)ct.width * ct.height * 4 * 4 / 3 / 1024) + " KB)\n").c_str());
+		return create_texture(desc, ct.data.data());
+	}
+
+	id::id_type ResourceRegistry::create_texture_from_image(ImageData& image_data, const std::string& label, const std::string* cache_path)
 	{
 		VORTEX_VLOG(("Loaded texture: " + label + " (" +
 			std::to_string(image_data.width) + "x" + std::to_string(image_data.height) + ")\n").c_str());
@@ -134,10 +153,28 @@ namespace vortex::graphics
 		case ImageFormat::RG8:
 			desc.format = TextureFormat::RG8_UNORM;
 			break;
+		case ImageFormat::RGBA16F:
+			desc.format = TextureFormat::RGBA16_FLOAT;   // an HDR sky: sampled at mip 0 by the sky pass, tonemapped there
+			desc.generate_mips = false;
+			break;
 		case ImageFormat::RGBA8:
 		default:
 			desc.format = TextureFormat::RGBA8_UNORM;
 			break;
+		}
+
+		// block compression (#179): a big RGBA8 picture goes to the GPU as BC1 / BC3 / BC5 with its mip chain — a quarter
+		// to an eighth of the memory and bandwidth; cached on disk by file when the path is known
+		if (desc.format == TextureFormat::RGBA8_UNORM && TextureCompress::eligible(image_data.width, image_data.height) && true)
+		{
+			CompressedTexture ct;
+			const CompressKind kind = TextureCompress::kind_for(label, pixel_data, image_data.width, image_data.height);
+			if (TextureCompress::compress_rgba8(pixel_data, image_data.width, image_data.height, kind, true, ct))
+			{
+				if (cache_path) TextureCompress::save_cached(TextureCompress::cache_key(*cache_path, CompressKind::Auto), ct);
+				const id::id_type cid = create_texture_compressed(ct, label);
+				if (cid != id::invalid_id) return cid;
+			}
 		}
 
 		return create_texture(desc, pixel_data);

@@ -30,11 +30,14 @@ struct PerFrame
     float fog_height_y;                // @144
     float fog_height_falloff;
     uint fog_mode;
-    float fog_padding;
+    float scene_exposure;              // @156  pre-tonemap multiplier (0.5 = classic; <= 0 reads as 0.5)
     float shadow_map_texel;            // @160
-    uint shadow_padding[3];
+    uint tonemapper;                   // @164  0 = ACES fit, 1 = PBR Neutral
+    float gi_strength;                 // @168  screen-space GI: > 0 = ssao_tex.rgb carries bounce light
+    uint shadow_padding1;
     float ssao_enabled;                // @176
-    float ssao_padding[3];
+    float ssao_padding[2];             // the AO UV scale
+    float fog_sun_glow;                // @188  the sun's glow in the fog (0 = off)
     float4 env_sky;                    // @192  scene sky gradient for reflections (rgb); w = 1 when a sky is set
     float4 env_horizon;                // @208
     float4 env_ground;                 // @224
@@ -258,12 +261,51 @@ static inline float fog_optical_depth(float density, float height_y, float k, fl
     return density * (below + above * mean);
 }
 
+// The scene's tonemapper (frame.tonemapper): 0 = the ACES fit (classic, pulls bright saturated colours towards white);
+// 1 = Khronos PBR Neutral (hue-preserving with a gentle highlight desaturation). Input = the EXPOSED scene colour.
+static inline float3 tonemap_neutral(float3 color)
+{
+    const float start_compression = 0.8 - 0.04;
+    const float desaturation = 0.15;
+    float x = min(color.r, min(color.g, color.b));
+    float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+    color -= offset;
+    float peak = max(color.r, max(color.g, color.b));
+    if (peak < start_compression) return color;
+    const float d = 1.0 - start_compression;
+    float new_peak = 1.0 - d * d / (peak + d - start_compression);
+    color *= new_peak / peak;
+    float g = 1.0 - 1.0 / (desaturation * (peak - new_peak) + 1.0);
+    return mix(color, float3(new_peak), g);
+}
+static inline float3 tonemap_scene(float3 x, uint mode)
+{
+    if (mode == 1u) return saturate(tonemap_neutral(max(x, 0.0)));
+    float3 a = x * (x + 0.0245786) - 0.000090537;
+    float3 b = x * (0.983729 * x + 0.4329510) + 0.238081;
+    return saturate(a / b);
+}
+
+// Aerial perspective: the flat fog colour plus the sun's forward-scatter glow when looking towards it (fog_sun_glow 0 = off).
+static inline float3 fog_inscatter(constant PerFrame& frame, float3 world_pos)
+{
+    float3 c = float3(frame.fog_color);
+    if (frame.fog_sun_glow > 0.0 && frame.directional_intensity > 0.001)
+    {
+        float3 V = normalize(world_pos - float3(frame.camera_position));
+        float mu = saturate(dot(V, normalize(-float3(frame.light_direction))));
+        float phase = 0.12 * mu * mu + 0.88 * pow(mu, 10.0);
+        c += float3(frame.light_color) * (frame.fog_sun_glow * phase);
+    }
+    return c;
+}
+
 static inline float3 apply_fog(constant PerFrame& frame, float3 color, float3 world_pos)
 {
     if (frame.fog_density <= 0.0) return color;
     float optical = fog_optical_depth(frame.fog_density, frame.fog_height_y, frame.fog_height_falloff, float3(frame.camera_position), world_pos);
     float f = 1.0 - exp2(-optical);
-    return mix(color, float3(frame.fog_color), saturate(f));
+    return mix(color, fog_inscatter(frame, world_pos), saturate(f));
 }
 
 static inline float d_ggx(float NdotH, float roughness)
@@ -320,6 +362,40 @@ static inline float sample_spot_shadow(constant PerFrame& frame, constant LightB
     return mix(1.0, lit, saturate(strength));
 }
 
+// The sun's shadow filter (Light ▸ Soft): softness <= 1 = the classic 3x3 box; above it a 16-tap Poisson disk of that
+// radius in shadow texels — a real penumbra under palms instead of a stair-stepped edge.
+constant float2 poisson16[16] = { float2(-0.94201624,-0.39906216), float2(0.94558609,-0.76890725), float2(-0.094184101,-0.92938870), float2(0.34495938,0.29387760), float2(-0.91588581,0.45771432), float2(-0.81544232,-0.87912464), float2(-0.38277543,0.27676845), float2(0.97484398,0.75648379), float2(0.44323325,-0.97511554), float2(0.53742981,-0.47373420), float2(-0.26496911,-0.41893023), float2(0.79197514,0.19090188), float2(-0.24188840,0.99706507), float2(-0.81409955,0.91437590), float2(0.19984126,0.78641367), float2(0.14383161,-0.14100790) };
+static inline float csm_pcf(depth2d<float> atlas, sampler smp, float2 suv, float depth, float atlas_texel, float softness, float zscale, float mpt)
+{
+    float lit = 0.0;
+    if (softness <= 1.01)
+    {
+        for (int y = -1; y <= 1; ++y)
+            for (int x = -1; x <= 1; ++x)
+                lit += atlas.sample_compare(smp, suv + float2((float)x, (float)y) * atlas_texel, depth);
+        return lit / 9.0;
+    }
+    // contact hardening (PCSS without a depth read): comparison taps at the receiver's depth minus 0 / 1 / 3 / 9 m over the
+    // widest penumbra tell how far behind the receiver the blockers sit; the Poisson radius grows with that distance — a
+    // trunk's shadow is sharp at its foot and soft where the crown throws it 10 m up. Softness caps the radius (texels).
+    const float tan_a = 0.035;   // the sun's angular radius, widened to 2 degrees as the big engines do
+    float rs = clamp(12.0 * tan_a / mpt, 1.0, softness) * atlas_texel;
+    float sh[4];
+    for (int l = 0; l < 4; ++l)
+    {
+        float k = (l == 0) ? 0.0 : (l == 1 ? 1.0 : (l == 2 ? 3.0 : 9.0));
+        float s = 0.0;
+        for (int i = 0; i < 4; ++i) s += atlas.sample_compare(smp, suv + poisson16[i * 4 + l] * rs, depth - k * zscale);
+        sh[l] = 1.0 - s * 0.25;
+    }
+    if (sh[0] < 0.02) return 1.0;   // nothing in the way anywhere in the search disk
+    float bd = (0.5 * (sh[0] + sh[1]) + (sh[1] + sh[2]) + 3.0 * (sh[2] + sh[3])) / max(sh[0], 0.05);   // the mean blocker distance (m)
+    float r = clamp(bd * tan_a / mpt, 1.0, softness) * atlas_texel;
+    for (int i = 0; i < 16; ++i)
+        lit += atlas.sample_compare(smp, suv + poisson16[i] * r, depth);
+    return lit / 16.0;
+}
+
 static inline float sample_cascade_shadow(constant PerFrame& frame, constant LightBuffer& lights,
                                           depth2d<float> atlas, sampler smp, float3 wp)
 {
@@ -334,15 +410,15 @@ static inline float sample_cascade_shadow(constant PerFrame& frame, constant Lig
         float2 suv = ndc.xy * float2(0.5, -0.5) + 0.5;
         if (min(suv.x, suv.y) < 0.02 || max(suv.x, suv.y) > 0.98 || ndc.z > 1.0 || ndc.z < 0.0) continue;
         float t = frame.shadow_map_texel;
-        suv = clamp(suv, t * 1.5, 1.0 - t * 1.5) * 0.5;
+        float guard = t * (max(lights.dir_shadow_params.w, 1.0) + 0.5);   // the whole filter stays inside the tile
+        suv = clamp(suv, guard, 1.0 - guard) * 0.5;
         suv += float2((c & 1) != 0 ? 0.5 : 0.0, (c & 2) != 0 ? 0.5 : 0.0);
-        float bias = lights.dir_shadow_params.y * (1.0 + (float)c);
+        float bias = lights.dir_shadow_params.y * (1.0 + (float)c) * (0.75 + 0.25 * max(lights.dir_shadow_params.w, 1.0));
         float atlas_texel = t * 0.5;
-        float lit = 0.0;
-        for (int y = -1; y <= 1; ++y)
-            for (int x = -1; x <= 1; ++x)
-                lit += atlas.sample_compare(smp, suv + float2((float)x, (float)y) * atlas_texel, ndc.z - bias);
-        return mix(1.0, lit / 9.0, saturate(lights.dir_shadow_params.x));
+        float4x4 M = lights.cascade_vp[c];
+        float zscale = length(float3(M[0][2], M[1][2], M[2][2]));                       // depth units per metre along the light
+        float mpt = 2.0 * t / max(length(float3(M[0][0], M[1][0], M[2][0])), 1e-6);   // metres per shadow texel in this cascade
+        return mix(1.0, csm_pcf(atlas, smp, suv, ndc.z - bias, atlas_texel, lights.dir_shadow_params.w, zscale, mpt), saturate(lights.dir_shadow_params.x));
     }
     return 1.0;
 }
@@ -504,6 +580,7 @@ fragment float4 PSMain(VSOut in [[stage_in]],
     if (obj.has_normal_texture != 0)
     {
         float3 nm = normal_tex.sample(normal_smp, uv).rgb * 2.0 - 1.0;
+        if (obj.has_normal_texture == 2) nm.z = sqrt(saturate(1.0 - dot(nm.xy, nm.xy)));   // a two-channel (BC5) map
         if (obj.use_directx_normals == 0) nm.y = -nm.y;
         nm.xy *= obj.normal_strength;
         N = normalize(nm.x * T + nm.y * B + nm.z * N);
@@ -599,7 +676,9 @@ fragment float4 PSMain(VSOut in [[stage_in]],
     if (frame.ssao_enabled > 0.5)
     {
         float2 auv = in.pos.xy * float2(frame.ssao_padding[0], frame.ssao_padding[1]);
-        ambient *= ssao_tex.sample(ssao_smp, auv).r;
+        float4 ss = ssao_tex.sample(ssao_smp, auv);
+        ambient *= ss.a;
+        if (frame.gi_strength > 0.0) ambient += ss.rgb * ss.rgb * 4.0 * albedo * (1.0 - metallic) * ss.a;   // screen-space GI (#257 step 1)
     }
 
     float rim_fresnel = pow(saturate(1.0 - NdotV), 5.0);
@@ -634,10 +713,7 @@ fragment float4 PSMain(VSOut in [[stage_in]],
     color = apply_fog(frame, color, in.world_pos);
 
     // ACES filmic (RRT+ODT fit)
-    float3 x = color * 0.5;
-    float3 a = x * (x + 0.0245786) - 0.000090537;
-    float3 b = x * (0.983729 * x + 0.4329510) + 0.238081;
-    color = saturate(a / b);
+    color = tonemap_scene(color * (frame.scene_exposure > 0.0 ? frame.scene_exposure : 0.5), frame.tonemapper);   // the scene exposure, then the curve
     color = pow(max(color, 0.0), 1.0 / 2.2);
     return float4(color, alpha);
 }

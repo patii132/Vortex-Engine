@@ -26,8 +26,14 @@ namespace vortex::graphics::sdlgpu
 			float texel[2];
 			float radius, intensity, bias, proj_scale;
 			float pad[2];
+			// screen-space GI (#257 step 1)
+			DirectX::XMFLOAT4X4 proj, view_to_prev_clip;
+			float gi_strength, scene_exposure, prev_valid, gi_radius;
+			// the bounce from the sun's shadow map (#257 step 2) — appended @240
+			DirectX::XMFLOAT4X4 view_to_rsm, rsm_to_view;
+			float rsm_tile[4], rsm_sun_view[4], rsm_flux[4];
 		};
-		static_assert(sizeof(SsaoCB) == 96, "SsaoCB must byte-match ssao.metal");
+		static_assert(sizeof(SsaoCB) == 416, "SsaoCB must byte-match ssao.metal");
 
 		struct BloomCB
 		{
@@ -107,15 +113,15 @@ namespace vortex::graphics::sdlgpu
 		if (m_post_ready) return true;
 		if (!m_device || !m_pipeline_shadow) return false;
 		m_vs_ssao = create_shader("ssao", "SsaoVS", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0);
-		m_fs_ssao = create_shader("ssao", "SsaoPS", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0, 1);
+		m_fs_ssao = create_shader("ssao", "SsaoPS", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 0, 1);   // depth + the previous frame + the sun's shadow atlas (the bounce)   // depth + the previous frame's colour (GI)
 		m_fs_ssao_blur = create_shader("ssao", "SsaoBlurPS", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0, 1);
 		m_vs_bloom = create_shader("bloom", "BloomVS", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0);
 		m_fs_bloom_prefilter = create_shader("bloom", "BloomPrefilterPS", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0, 1);
 		m_fs_bloom_down = create_shader("bloom", "BloomDownsamplePS", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0, 1);
 		m_fs_bloom_up = create_shader("bloom", "BloomUpsamplePS", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0, 1);
 		if (!m_vs_ssao || !m_fs_ssao || !m_fs_ssao_blur || !m_vs_bloom || !m_fs_bloom_prefilter || !m_fs_bloom_down || !m_fs_bloom_up) { destroy_postfx_resources(); return false; }
-		m_pipeline_ssao = create_post_pipeline(m_vs_ssao, m_fs_ssao, SDL_GPU_TEXTUREFORMAT_R8_UNORM, false);
-		m_pipeline_ssao_blur = create_post_pipeline(m_vs_ssao, m_fs_ssao_blur, SDL_GPU_TEXTUREFORMAT_R8_UNORM, false);
+		m_pipeline_ssao = create_post_pipeline(m_vs_ssao, m_fs_ssao, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, false);   // rgb = GI, a = AO
+		m_pipeline_ssao_blur = create_post_pipeline(m_vs_ssao, m_fs_ssao_blur, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, false);
 		m_pipeline_bloom_prefilter = create_post_pipeline(m_vs_bloom, m_fs_bloom_prefilter, m_scene_format, false);
 		m_pipeline_bloom_down = create_post_pipeline(m_vs_bloom, m_fs_bloom_down, m_scene_format, false);
 		m_pipeline_bloom_up = create_post_pipeline(m_vs_bloom, m_fs_bloom_up, m_scene_format, true);
@@ -165,8 +171,8 @@ namespace vortex::graphics::sdlgpu
 		SsaoSet s{};
 		s.w = w; s.h = h;
 		s.depth = make_texture(m_device, w, h, m_depth_format, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
-		s.ao = make_texture(m_device, w, h, SDL_GPU_TEXTUREFORMAT_R8_UNORM, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
-		s.blur = make_texture(m_device, w, h, SDL_GPU_TEXTUREFORMAT_R8_UNORM, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
+		s.ao = make_texture(m_device, w, h, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);   // rgb = GI, a = AO
+		s.blur = make_texture(m_device, w, h, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
 		if (!s.depth || !s.ao || !s.blur) { log(std::string("SSAO targets failed: ") + SDL_GetError()); if (s.depth) SDL_ReleaseGPUTexture(m_device, s.depth); if (s.ao) SDL_ReleaseGPUTexture(m_device, s.ao); if (s.blur) SDL_ReleaseGPUTexture(m_device, s.blur); return nullptr; }
 		m_ssao_sets.push_back(s);
 		return &m_ssao_sets.back();
@@ -279,6 +285,38 @@ namespace vortex::graphics::sdlgpu
 		cb.texel[0] = 1.0f / (float)hw; cb.texel[1] = 1.0f / (float)hh;
 		cb.radius = m_ssao_radius; cb.intensity = m_ssao_intensity; cb.bias = 0.015f;
 		cb.proj_scale = 0.5f * XMVectorGetY(proj.r[1]) * (float)hh;
+		// screen-space GI (#257 step 1): the previous frame's opaque copy at this size is the radiance source
+		const bool gi_prev = m_gi_enabled && m_gi_prev_valid && m_scene_color_copy && m_gi_prev_w == target_w && m_gi_prev_h == target_h;
+		XMStoreFloat4x4(&cb.proj, proj);
+		XMStoreFloat4x4(&cb.view_to_prev_clip, proj * XMLoadFloat4x4(&view.inverse_view_projection) * XMLoadFloat4x4(&m_gi_prev_view_projection));
+		cb.gi_strength = m_gi_enabled ? m_gi_strength : 0.0f; cb.scene_exposure = view.frame.scene_exposure > 0.0f ? view.frame.scene_exposure : 0.5f;
+		cb.prev_valid = gi_prev ? 1.0f : 0.0f; cb.gi_radius = m_gi_radius;
+		// the bounce from the sun's shadow map (#257 step 2): the far cascade (it holds every receiver and its surroundings, at
+		// ~7 cm per texel for a 150 m shadow distance) read as a reflective shadow map — the ground's albedo x the sun as the emitters' radiance
+		const bool rsm_on = m_gi_enabled && m_csm_count > 0 && m_csm_atlas && m_directional_intensity > 0.001f && m_rsm_enabled;   // the scene's sun (m_sun_* is the gradient skybox's disc)
+		if (rsm_on)
+		{
+			const u32 c = m_csm_count - 1;   // the last cascade: the only one whose crop holds every receiver out to the shadow distance (the near ones are frustum slices)
+			XMMATRIX rsmVP = XMLoadFloat4x4(&m_csm_vp[c]);
+			XMMATRIX invVP = XMLoadFloat4x4(&view.inverse_view_projection);
+			XMMATRIX VP = XMLoadFloat4x4(&view.view_projection);
+			XMStoreFloat4x4(&cb.view_to_rsm, proj * invVP * rsmVP);
+			XMStoreFloat4x4(&cb.rsm_to_view, XMMatrixInverse(nullptr, rsmVP) * VP * XMMatrixInverse(nullptr, proj));
+			cb.rsm_tile[0] = (c & 1) ? 0.5f : 0.0f; cb.rsm_tile[1] = (c & 2) ? 0.5f : 0.0f; cb.rsm_tile[2] = 0.5f; cb.rsm_tile[3] = 1.0f / (2.0f * (float)SHADOW_TILE_SIZE);
+			XMVECTOR Lw = XMVector3Normalize(XMVectorNegate(XMLoadFloat3(&view.frame.light_direction)));
+			XMMATRIX V = XMMatrixLookToLH(XMLoadFloat3(&view.eye), XMLoadFloat3(&view.forward), XMLoadFloat3(&view.up));
+			XMVECTOR Lv = XMVector3Normalize(XMVector3TransformNormal(Lw, V));
+			const float radius_m = (std::max)(2.0f, m_gi_radius * 2.0f);
+			const float cascade_r = m_csm_radius[c] > 0.5f ? m_csm_radius[c] : 0.5f;
+			cb.rsm_sun_view[0] = XMVectorGetX(Lv); cb.rsm_sun_view[1] = XMVectorGetY(Lv); cb.rsm_sun_view[2] = XMVectorGetZ(Lv);
+			cb.rsm_sun_view[3] = (std::min)(0.3f, radius_m / (2.0f * cascade_r));
+			cb.rsm_flux[0] = m_gi_albedo.x * m_light_color.x * m_directional_intensity; cb.rsm_flux[1] = m_gi_albedo.y * m_light_color.y * m_directional_intensity;
+			cb.rsm_flux[2] = m_gi_albedo.z * m_light_color.z * m_directional_intensity; cb.rsm_flux[3] = radius_m;
+			static bool logged = false;
+			if (!logged) { logged = true; log("GI: the bounce from the sun's shadow map is on (cascade " + std::to_string(c) + ", " + std::to_string((int)(2.0f * cascade_r)) + " m across, gather " + std::to_string((int)radius_m) + " m)"); }
+		}
+		auto& regw = ResourceRegistry::instance(); Texture* whitep = regw.white_texture();
+		SDL_GPUTexture* prev_tex = gi_prev ? m_scene_color_copy : (whitep ? whitep->texture() : nullptr);
 		auto fullscreen = [&](SDL_GPUTexture* dst, SDL_GPUGraphicsPipeline* pipeline, SDL_GPUTexture* src, SDL_GPUSampler* smp)
 		{
 			SDL_GPUColorTargetInfo color{};
@@ -288,8 +326,8 @@ namespace vortex::graphics::sdlgpu
 			SDL_BindGPUGraphicsPipeline(pass, pipeline);
 			SDL_GPUViewport vp{ 0, 0, (float)hw, (float)hh, 0.0f, 1.0f };
 			SDL_SetGPUViewport(pass, &vp);
-			SDL_GPUTextureSamplerBinding b{ src, smp };
-			SDL_BindGPUFragmentSamplers(pass, 0, &b, 1);
+			SDL_GPUTextureSamplerBinding b[3] = { { src, smp }, { prev_tex ? prev_tex : src, m_sampler_linear_clamp }, { rsm_on ? m_csm_atlas : src, m_sampler_point_clamp } };
+			SDL_BindGPUFragmentSamplers(pass, 0, b, pipeline == m_pipeline_ssao ? 3u : 1u);
 			SDL_PushGPUFragmentUniformData(cmd, 0, &cb, sizeof(cb));
 			SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
 			SDL_EndGPURenderPass(pass);

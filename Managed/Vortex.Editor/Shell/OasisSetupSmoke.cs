@@ -45,6 +45,8 @@ namespace VortexEditor.Shell
         const float Size = 512f;                 // metres, centred on the origin
         const int Resolution = 513;              // 1 m cells
         const float WaterLevel = -6f;            // the lakes' surface (the plain is ~0)
+        const float FarSize = 4096f;             // the far dunes: to the horizon, 8 m cells
+        const int FarResolution = 513;
         static readonly NVec3 LakeA = new NVec3(-30f, 0f, 20f);    // the west lake (bigger)
         static readonly NVec3 LakeB = new NVec3(70f, 0f, -40f);    // the east lake
         const float LakeAR = 78f, LakeBR = 64f;  // basin radii
@@ -60,7 +62,13 @@ namespace VortexEditor.Shell
 
             // ---- the Tactical player rig (weapons, HUD, controller) becomes a prefab the oasis instantiates ----
             string rigPrefab = null;
-            var range = project.ActiveScene;
+            // the rig comes from the Range scene (the Tactical template's), never from a previous Oasis: taking the player of
+            // whichever scene was active re-saved an oasis player — with its Footprints script and its weather children — as
+            // the prefab, and every further run added one more of each (19 of everything after 19 runs, 2026-10-12)
+            Scene range = null;
+            foreach (var sc in project.Scenes) if (sc != null && string.Equals(sc.Name, "Range", StringComparison.OrdinalIgnoreCase)) { range = sc; break; }
+            if (range == null) range = project.ActiveScene;
+            if (range != null && !range.IsLoaded) { try { range.Load(); } catch { } }
             var rangePlayer = range == null ? null : TemplateSetupSmoke.Find(range, e => e.Name == "Player" || e.Tag == "Player");
             if (rangePlayer != null)
             {
@@ -88,7 +96,7 @@ namespace VortexEditor.Shell
                 log.Log("oasis setup: replaced the previous Oasis scene");
             }
             // the data files of a previous run go too: the foliage service would load and ADD to them
-            foreach (var rel in new[] { "Assets/Terrain/Oasis_Terrain.vterrain", "Assets/Foliage/Oasis_Vegetation.vfoliage" })
+            foreach (var rel in new[] { "Assets/Terrain/Oasis_Terrain.vterrain", "Assets/Terrain/Oasis_Far.vterrain", "Assets/Foliage/Oasis_Vegetation.vfoliage" })
             {
                 try { var f = Path.Combine(project.Path, rel); if (File.Exists(f)) File.Delete(f); } catch { }
             }
@@ -102,17 +110,19 @@ namespace VortexEditor.Shell
             float sunYaw, sunPitch;
             TransformMath.LookAngles(new Vector3(0f, 0f, 0f), new Vector3(-toSun.X, -toSun.Y, -toSun.Z), out sunYaw, out sunPitch);
             var sun = scene.CreateEntity("Sun");
-            sun.Transform.LocalRotation = new Vector3(sunPitch, sunYaw, 0f);
-            sun.AddComponentDirect(new Light(sun, LightType.Directional) { Intensity = 4.8f, ColorR = 1f, ColorG = 0.87f, ColorB = 0.68f, ShadowType = ShadowType.Soft });
+            // the late afternoon of the syferfontein pure sky (18.2° up, azimuth 216° — tools/hdri-analyze.py): long palm shadows,
+            // the sun's glow in the haze; the goegap noon stays the "noon" weather preset
+            sun.Transform.LocalRotation = new Vector3(18.19f, -144.05f, 0f);
+            sun.AddComponentDirect(new Light(sun, LightType.Directional) { Intensity = 8f, ColorR = 1f, ColorG = 0.84f, ColorB = 0.62f, ShadowType = ShadowType.Soft });   // at 18° a flat floor gets only 0.31 of the sun — the ambient has to stay well under that or the shade is as bright as the sun (it was, at 5.5 / 0.9). A late sun, but not orange: the sand must stay golden, not pink
 
             // ---- the sky: the desert HDRI; the gradient colours are its environment (reflections, the lakes' sky) ----
             var sky = scene.CreateEntity("Sky");
             sky.AddComponentDirect(new Skybox(sky)
             {
-                IsEnabled = true, SkyboxType = SkyboxType.Texture, TexturePath = "Assets/Skies/goegap_2k.hdr", Exposure = 0.85f, AmbientIntensity = 0.85f,
-                TopColorR = 0.28f, TopColorG = 0.48f, TopColorB = 0.9f,
-                HorizonColorR = 0.82f, HorizonColorG = 0.82f, HorizonColorB = 0.8f,
-                BottomColorR = 0.62f, BottomColorG = 0.49f, BottomColorB = 0.33f
+                IsEnabled = true, SkyboxType = SkyboxType.Texture, TexturePath = "Assets/Skies/syferfontein_18d_clear_puresky_2k.hdr", Exposure = 0.4f, AmbientIntensity = 0.55f,
+                TopColorR = 0.25f, TopColorG = 0.42f, TopColorB = 0.85f,
+                HorizonColorR = 0.95f, HorizonColorG = 0.88f, HorizonColorB = 0.75f,
+                BottomColorR = 0.60f, BottomColorG = 0.50f, BottomColorB = 0.35f
             });
 
             // ---- the terrain ----
@@ -147,6 +157,37 @@ namespace VortexEditor.Shell
             TerrainService.Save(ter);
             log.Log("oasis setup: terrain " + Size + " m, " + res + " samples, heights " + data.MinHeight.ToString("0.0") + " .. " + data.MaxHeight.ToString("0.0") + " m");
 
+            // ---- the far dunes: the same ground continued to the horizon at 8 m cells, a dune sea that grows with the distance
+            // and a mountain range along the edge; it runs under the oasis terrain (1.2 m lower) so only the rim shows ----
+            var far = scene.CreateEntity("Far Dunes");
+            far.Transform.LocalPosition = new Vector3(-FarSize * 0.5f, 0f, -FarSize * 0.5f);
+            var ftc = new TerrainComponent(far)
+            {
+                Size = FarSize, Resolution = FarResolution, LodDistance = 900f, Collision = true, Navigation = false,
+                Layer0Material = "Assets/Materials/aerial_sand.vmat", Layer0Tile = 8f,
+                Layer1Material = "Assets/Materials/damp_sand.vmat", Layer1Tile = 4f,
+                Layer2Material = "Assets/Materials/rock_face_03.vmat", Layer2Tile = 9f,
+                Layer3Material = "Assets/Materials/grass_ground.vmat", Layer3Tile = 3f,
+                DataPath = "Assets/Terrain/Oasis_Far.vterrain"
+            };
+            far.AddComponentDirect(ftc);
+            TerrainData fdata2; float fcell;
+            if (!TerrainService.TryGetData(far, out fdata2, out fcell)) { log.LogError("oasis setup: no far terrain data"); return false; }
+            int fres = fdata2.Resolution;
+            for (int z = 0; z < fres; z++)
+                for (int x = 0; x < fres; x++)
+                    fdata2.Heights[z * fres + x] = FarGround(-FarSize * 0.5f + x * fcell, -FarSize * 0.5f + z * fcell);
+            fdata2.MarkChanged();
+            for (int z = 0; z < fres; z++)
+                for (int x = 0; x < fres; x++)
+                {
+                    float wx = -FarSize * 0.5f + x * fcell, wz = -FarSize * 0.5f + z * fcell;
+                    Splat(fdata2.Splat, (z * fres + x) * 4, wx, wz, fdata2.Heights[z * fres + x], fdata2.Normal(x, z, fcell).Y);
+                }
+            TerrainService.MarkDirty(far, new SampleRect { X0 = 0, Z0 = 0, X1 = fres - 1, Z1 = fres - 1 }, true, true);
+            TerrainService.Save(far);
+            log.Log("oasis setup: far dunes " + FarSize + " m, " + fres + " samples, heights " + fdata2.MinHeight.ToString("0.0") + " .. " + fdata2.MaxHeight.ToString("0.0") + " m");
+
             // ---- the lakes ----
             Lake(scene, "Oasis Lake West", LakeA, 170f);
             Lake(scene, "Oasis Lake East", LakeB, 140f);
@@ -163,9 +204,18 @@ namespace VortexEditor.Shell
             {
                 rig.Name = "Player";
                 rig.PrefabPath = null;   // its own entity now, not a linked instance
+                // whatever the prefab brought along from an earlier oasis goes first: one Footprints script, no weather children
+                foreach (var sc in rig.GetComponents<Script>())
+                    if (sc != null && (sc.ScriptPath ?? "").EndsWith("Footprints.cs", StringComparison.OrdinalIgnoreCase)) rig.RemoveComponent(sc);
+                foreach (var ch in new List<GameEntity>(rig.Children))
+                    if (ch != null && (ch.Name == "Weather Haze" || ch.Name == "Weather Sand")) { rig.RemoveChild(ch); scene.RemoveEntity(ch); }
                 rig.AddComponentDirect(new Script(rig, "Assets/Scripts/Player/Footprints.cs"));   // boot prints in the sand
-                rig.Transform.LocalPosition = new Vector3(24f, startY + 1.2f, -10f);
+                // the rig's entity sits at EYE height (CoDMovement: feet = Position.Y - 1.7): 1.2 m put the feet half a metre
+                // under the sand, and with the far dunes' sheet 1.2 m below the oasis the capsule was sandwiched between two
+                // terrains and pushed through both ("man fällt durch den Boden", 2026-10-11)
+                rig.Transform.LocalPosition = new Vector3(24f, startY + 1.9f, -10f);
                 rig.Transform.LocalRotation = new Vector3(0f, -60f, 0f);
+                SetFarClip(rig, 6000f);   // the far dunes and the mountains are 2 km out
                 log.Log("oasis setup: the Tactical player rig stands on the strip between the lakes");
                 // the weather's dust effects travel with the player: a haze and a sandstorm emitter, off until a preset asks
                 foreach (var w in new[] { ("Weather Haze", "Assets/VFX/Dust_Haze.vfx"), ("Weather Sand", "Assets/VFX/Sandstorm.vfx") })
@@ -181,7 +231,7 @@ namespace VortexEditor.Shell
                 var camera = scene.CreateEntity("Main Camera");
                 camera.Transform.LocalPosition = new Vector3(24f, startY + 1.7f, -10f);
                 camera.Transform.LocalRotation = new Vector3(0f, -60f, 0f);
-                camera.AddComponentDirect(new Camera(camera) { IsMainCamera = true, FarClip = 2500f });
+                camera.AddComponentDirect(new Camera(camera) { IsMainCamera = true, FarClip = 6000f });
                 var playerScript = ScriptingService.EnsurePlayerController(project.Path);
                 if (!string.IsNullOrEmpty(playerScript)) camera.AddComponentDirect(new Script(camera, playerScript));
             }
@@ -210,12 +260,20 @@ namespace VortexEditor.Shell
 
             // ---- the air: warm haze that thins with height, a touch of bloom and AO, no vignette ----
             var st = scene.Settings;
-            st.FogEnabled = true; st.FogDensity = 0.0021f; st.FogHeightY = -4f; st.FogHeightFalloff = 0.025f;
-            st.FogR = 0.86f; st.FogG = 0.74f; st.FogB = 0.54f;
-            st.GradeEnabled = true; st.Exposure = 0.05f; st.Contrast = 1.06f; st.Saturation = 1.12f; st.Temperature = 0.22f; st.Tint = 0.02f;
+            st.Tonemapper = 1;         // PBR Neutral: the sand stays orange, the sky blue — the ACES fit washed both towards white
+            st.AntiAliasEnabled = true;   // FXAA: the fronds and the ripples stop flickering
+            st.BounceStrength = 1.2f; st.BounceR = 0.62f; st.BounceG = 0.40f; st.BounceB = 0.20f;   // the sand's warm bounce into the shadows: the reference's shade is orange-brown; at 1.0 the sky's blue won and the grove floor turned grey
+            st.SceneExposure = 1.7f;   // stops before the tonemapper: the low sun needs more aperture than noon; 2.2 pushed the sunlit sand into the tonemapper's shoulder (pale pink), 2.6 clipped the crowns
+            st.FogEnabled = true; st.FogDensity = 0.00028f;   // at 0.0010 the air swallowed 63 % of a dune 1 km out — the reference's dunes are saturated to the horizon st.FogHeightY = -4f; st.FogHeightFalloff = 0.012f;
+            st.FogR = 0.70f; st.FogG = 0.62f; st.FogB = 0.52f; st.FogSunGlow = 0.2f;   // the reference's distance is peach, not blue-white   // the reference's far dunes fade to a neutral, slightly cool white — a warm haze turned them salmon
+            st.GradeEnabled = true; st.Exposure = 0f; st.Contrast = 1.06f; st.Saturation = 1.05f;   // a light touch: the grade only reaches the viewport once SetPostMainView is on (the oasis capture turns it on) — at 1.22 the sky went navy and the sand neon st.Temperature = 0.0f; st.Tint = 0.0f;   // the reference is NOT saturated: the sand golden, the palms olive, the shadows warm
             st.AoEnabled = true; st.AoRadius = 0.8f; st.AoIntensity = 0.9f;
-            st.BloomEnabled = true; st.BloomThreshold = 0.95f; st.BloomIntensity = 0.3f; st.BloomScatter = 0.6f;
-            st.VolumetricEnabled = false;
+            st.GiEnabled = true; st.GiStrength = 0.6f; st.GiRadius = 3.0f;   // screen-space GI: the sand's light on the trunks and the undergrowth
+            st.BloomEnabled = true; st.BloomThreshold = 0.95f; st.BloomIntensity = 0.18f; st.BloomScatter = 0.6f;   // 0.3 spread the sun into a white sheet
+            // sun shafts through the palms: a thin volumetric haze marched 160 m, strongly forward-scattering
+            st.VolumetricEnabled = true; st.VolumetricDensity = 0.0018f; st.VolumetricAnisotropy = 0.55f; st.VolumetricDistance = 120f;   // g 0.75 + sun 1.6 whited out a third of the frame around the sun (Henyey-Greenstein peaks 28x isotropic at g 0.75); the reference has soft shafts, not a sheet
+            st.VolumetricNoise = 0.25f; st.VolumetricNoiseScale = 12f; st.VolumetricNoiseSpeed = 0.2f; st.VolumetricSun = 0.3f;   // 0.6 whited out 12–16 % of a frame that looks towards the sun (the in-scatter sheet, measured 2026-10-12); 0.3 keeps the shafts and the sky
+            st.VolumetricLights = 0f; st.VolumetricAmbient = 0.04f; st.VolumetricSteps = 20; st.VolumetricShadows = true;
             st.Apply();
 
             // ---- the navmesh: the whole oasis walkable for the zombies (the terrain is ground, the trunks and rocks obstacles) ----
@@ -257,17 +315,34 @@ namespace VortexEditor.Shell
             return h;
         }
 
+        /// <summary>The far terrain's ground: the oasis ground continued (1.2 m lower under the oasis terrain so only the rim shows),
+        /// a dune sea whose swell grows with the distance, and a broken mountain range 1.4–2 km out all around.</summary>
+        internal static float FarGround(float x, float z)
+        {
+            float inside = 1f - Smooth((Math.Max(Math.Abs(x), Math.Abs(z)) - Size * 0.5f + 30f) / 36f);   // 1 under the oasis terrain
+            float h = Ground(x, z) - 1.2f * inside;
+            float r = (float)Math.Sqrt(x * x + z * z);
+            float sea = Smooth((r - 300f) / 500f);
+            h += sea * (22f * Fbm(x * 0.0018f + 11f, z * 0.0018f + 5f, 4) + 14f * Fbm(x * 0.0007f + 2f, z * 0.0007f + 9f, 3));
+            float ridge = Smooth((r - 1250f) / 400f);   // all around: the sky picture's own hills never show above the horizon
+            float m = 1f - Math.Abs(Fbm(x * 0.0011f + 4f, z * 0.0011f + 1f, 5));          // ridged: sharp crests
+            h += ridge * (120f + 320f * m * m + 40f * Fbm(x * 0.006f, z * 0.006f, 4));
+            return h;
+        }
+
         /// <summary>Ridged dunes running SW–NE (wind from the north-west): a gentle windward side, a steep slip face, bent by
         /// noise; broad undulations and ripples on top.</summary>
         private static float Dunes(float x, float z)
         {
             float u = (x + z) * 0.7071f, v = (x - z) * 0.7071f;
             float warp = 28f * Fbm(v * 0.011f + 4f, u * 0.006f + 8f, 3);
-            float phase = (u + warp) / 58f;
+            float phase = (u + warp) / 96f;
             float f = phase - (float)Math.Floor(phase);
-            float crest = f < 0.68f ? Smooth(f / 0.68f) : 1f - Smooth((f - 0.68f) / 0.32f);
-            float amp = 9.5f + 6.5f * Fbm(x * 0.004f + 7f, z * 0.004f + 3f, 3);
-            float big = 12f * Fbm(x * 0.0055f + 3.3f, z * 0.0055f + 7.1f, 4);
+            f = 1f - f;   // the long windward slopes face the sun (it stands in the north-east), the slip faces drop away from it into shadow — side-lit crests instead of a flat sheet
+            // a long windward slope (72 % of the wavelength) and a short steep slip face: the crest reads as an edge, not a hump
+            float crest = f < 0.72f ? Smooth(f / 0.72f) : 1f - Smooth((f - 0.72f) / 0.28f);
+            float amp = 15f + 9f * Fbm(x * 0.004f + 7f, z * 0.004f + 3f, 3);
+            float big = 16f * Fbm(x * 0.0045f + 3.3f, z * 0.0045f + 7.1f, 4);
             float detail = 0.7f * Fbm(x * 0.05f, z * 0.05f, 3);
             return crest * amp + big + detail;
         }
@@ -288,6 +363,12 @@ namespace VortexEditor.Shell
             float sum = sand + damp + rock + grass; if (sum < 1e-4f) { sand = 1f; sum = 1f; }
             s[o] = (byte)Math.Round(255f * sand / sum); s[o + 1] = (byte)Math.Round(255f * damp / sum);
             s[o + 2] = (byte)Math.Round(255f * rock / sum); s[o + 3] = (byte)Math.Round(255f * grass / sum);
+        }
+
+        private static bool TooCloseToAnyPalm(FoliageData data, NVec3 pos, float spacing)
+        {
+            foreach (var pl in data.Layers) if (pl.TypeName.StartsWith("Palm") && pl.AnyWithin(pos, spacing)) return true;
+            return false;
         }
 
         /// <summary>0 at a lake's centre, 1 at the oasis' edge, larger outside.</summary>
@@ -332,8 +413,10 @@ namespace VortexEditor.Shell
             e.AddComponentDirect(new WaterComponent(e)
             {
                 Size = size, CellSize = 1f,
-                DeepR = 0.02f, DeepG = 0.20f, DeepB = 0.25f, ShallowR = 0.28f, ShallowG = 0.72f, ShallowB = 0.64f,
-                Absorption = 3f, Reflection = 0.82f, Roughness = 0.05f, WaveScale = 9f, WaveSpeed = 0.5f, WaveHeight = 0.06f, FoamWidth = 0.45f, DefaultDepth = 3f
+                // the body colours are albedos (lit by sky + sun, then exposed): the reference's dark green needs 0.03–0.15
+                DeepR = 0.004f, DeepG = 0.022f, DeepB = 0.016f, ShallowR = 0.025f, ShallowG = 0.09f, ShallowB = 0.06f,
+                // dark green water that mirrors the palms and the sky; gentle ripples (a strong ripple normal painted the lake in white sky stripes)
+                Absorption = 2.5f, Reflection = 0.7f, Roughness = 0.06f, WaveScale = 9f, WaveSpeed = 0.5f, WaveHeight = 0.035f, FoamWidth = 0.45f, DefaultDepth = 3f
             });
         }
 
@@ -358,17 +441,22 @@ namespace VortexEditor.Shell
         {
             var l = new List<FoliageType>();
             // the palms (Yughues' palm pack, 18 – 21 m at scale 1): the skyline of the oasis
-            foreach (var p in new[] { "palm_straight", "palm_bend", "palm_dual", "palm_dual_bend", "palm_trio" })
-                l.Add(T("Palm " + p.Substring(5), "Assets/Models/Palms/" + p + "/" + p + ".gltf", 0.42f, 0.7f, 4.5f, 900f, 0f, 0.45f, 13f, 1, 0.35f, 12f, false, 32f, 0.15f));
-            l.Add(T("Palm v2", "Assets/Models/Palms/palm_tree_v2/palm_tree_v2.gltf", 0.5f, 0.8f, 4.5f, 900f, 0f, 0.4f, 11f, 1, 0.3f, 11f, false, 32f, 0.15f));
+            // date palms (tools/palm-gen.py: a leaning trunk, 36–44 pinnate fronds in three rings, a skirt of dead fronds — the
+            // silhouette of the reference); real size, so the scale stays near 1. The two Yughues palms keep the mix varied.
+            l.Add(T("Palm straight", "Assets/Models/Palms/date_palm_a/date_palm_a.gltf", 0.8f, 1.15f, 4.5f, 650f, 0f, 0.45f, 10f, 1, 0.35f, 9f, false, 32f, 0.15f));
+            l.Add(T("Palm bend", "Assets/Models/Palms/date_palm_b/date_palm_b.gltf", 0.75f, 1.1f, 4.5f, 650f, 0f, 0.45f, 12f, 1, 0.35f, 12f, false, 32f, 0.15f));
+            l.Add(T("Palm dual", "Assets/Models/Palms/date_palm_c/date_palm_c.gltf", 0.85f, 1.25f, 4.5f, 650f, 0f, 0.45f, 8f, 1, 0.35f, 7f, false, 32f, 0.15f));
+            l.Add(T("Palm dual_bend", "Assets/Models/Palms/date_palm_a/date_palm_a.gltf", 0.7f, 1.0f, 4.5f, 650f, 0f, 0.45f, 10f, 1, 0.35f, 9f, false, 32f, 0.15f));
+            l.Add(T("Palm trio", "Assets/Models/Palms/palm_trio/palm_trio.gltf", 0.42f, 0.7f, 4.5f, 650f, 0f, 0.45f, 13f, 1, 0.35f, 12f, false, 32f, 0.15f));
+            l.Add(T("Palm v2", "Assets/Models/Palms/date_palm_b/date_palm_b.gltf", 0.65f, 0.95f, 4.5f, 650f, 0f, 0.45f, 12f, 1, 0.3f, 11f, false, 32f, 0.15f));
             // trees on the damp ground
             l.Add(T("Island tree 1", "Assets/Models/Oasis/island_tree_01/island_tree_01_lod.gltf", 0.9f, 1.4f, 6f, 320f, 0f, 0.15f, 5f, 1, 0.3f, 5f, false, 35f, 0.1f));
             l.Add(T("Island tree 2", "Assets/Models/Oasis/island_tree_02/island_tree_02_lod.gltf", 0.9f, 1.4f, 6f, 320f, 0f, 0.15f, 4f, 1, 0.3f, 4f, false, 35f, 0.1f));
             l.Add(T("Small tree", "Assets/Models/Oasis/tree_small_02/tree_small_02_lod.gltf", 0.9f, 1.3f, 6f, 320f, 0f, 0.15f, 4.5f, 1, 0.25f, 4.5f, false, 35f, 0.1f));
             // shrubs
-            l.Add(T("Searsia burchellii", "Assets/Models/Oasis/searsia_burchellii/searsia_burchellii_lod.gltf", 0.7f, 1.2f, 5f, 150f, 0f, 0.08f, 2.5f, 0, 0f, 0f, false, 45f, 0.08f));
-            l.Add(T("Searsia lucida", "Assets/Models/Oasis/searsia_lucida/searsia_lucida_lod.gltf", 0.8f, 1.3f, 4f, 140f, 0f, 0.08f, 2f, 0, 0f, 0f, false, 45f, 0.06f));
-            l.Add(T("Rooibos", "Assets/Models/Oasis/wild_rooibos_bush/wild_rooibos_bush_2k.gltf", 0.9f, 1.6f, 2f, 120f, 50f, 0.06f, 0.6f, 0, 0f, 0f, true, 50f, 0.04f));
+            l.Add(T("Searsia burchellii", "Assets/Models/Palms/fern_a/fern_a.gltf", 0.8f, 1.3f, 1.6f, 160f, 60f, 0.12f, 1.2f, 0, 0f, 0f, true, 50f, 0.03f));   // fern clumps (tools/palm-gen.py --fern): the reference's undergrowth
+            l.Add(T("Searsia lucida", "Assets/Models/Palms/fern_b/fern_b.gltf", 0.7f, 1.2f, 1.8f, 160f, 60f, 0.12f, 1.2f, 0, 0f, 0f, true, 50f, 0.03f));
+            l.Add(T("Rooibos", "Assets/Models/Oasis/wild_rooibos_bush/wild_rooibos_bush_lod.gltf", 0.9f, 1.6f, 2f, 90f, 40f, 0.06f, 0.6f, 0, 0f, 0f, true, 50f, 0.04f));
             l.Add(T("Didelta", "Assets/Models/Oasis/didelta_spinosa/didelta_spinosa_lod.gltf", 0.7f, 1.2f, 5f, 140f, 0f, 0.07f, 2f, 0, 0f, 0f, false, 45f, 0.1f));
             // the desert
             l.Add(T("Quiver tree 1", "Assets/Models/Oasis/quiver_tree_01/quiver_tree_01_lod.gltf", 1.3f, 2.2f, 6f, 400f, 0f, 0.05f, 4f, 1, 0.25f, 4f, false, 40f, 0.06f));
@@ -377,7 +465,7 @@ namespace VortexEditor.Shell
             l.Add(T("Dry leaf", "Assets/Models/Oasis/dry_quiver_leaf/dry_quiver_leaf_lod.gltf", 1f, 1.6f, 1.2f, 100f, 40f, 0f, 0.4f, 0, 0f, 0f, true, 50f, 0.0f));
             l.Add(T("Dead trunk", "Assets/Models/Oasis/dead_quiver_trunk/dead_quiver_trunk_lod.gltf", 1f, 1.8f, 5f, 260f, 0f, 0f, 2f, 1, 0.2f, 2f, false, 45f, 0.12f));
             // grass and reeds at the water
-            l.Add(T("Grass", "Assets/Models/Oasis/grass_medium_02/grass_medium_02_lod.gltf", 1.2f, 2.2f, 0.7f, 120f, 35f, 0.05f, 0.5f, 0, 0f, 0f, true, 55f, 0.04f));
+            l.Add(T("Grass", "Assets/Models/Oasis/grass_medium_02/grass_medium_02_lod.gltf", 1.2f, 2.2f, 0.7f, 90f, 30f, 0.05f, 0.5f, 0, 0f, 0f, true, 55f, 0.04f));
             l.Add(T("Bermuda grass", "Assets/Models/Oasis/grass_bermuda_01/grass_bermuda_01_lod.gltf", 1.8f, 3.2f, 0.55f, 90f, 30f, 0.03f, 0.3f, 0, 0f, 0f, true, 55f, 0.02f));
             // the rocks
             l.Add(T("Boulder 2", "Assets/Models/Rocks/namaqualand_boulder_02/namaqualand_boulder_02_lod.gltf", 0.8f, 1.8f, 5f, 380f, 0f, 0f, 1f, 2, 0f, 0f, true, 60f, 0.2f));
@@ -387,6 +475,9 @@ namespace VortexEditor.Shell
             l.Add(T("Stones", "Assets/Models/Rocks/namaqualand_rocks_01/namaqualand_rocks_01_lod.gltf", 1.5f, 4f, 1.3f, 90f, 30f, 0f, 1f, 0, 0f, 0f, true, 60f, 0.02f));
             l.Add(T("Pebbles", "Assets/Models/Rocks/namaqualand_stones_01/namaqualand_stones_01_lod.gltf", 1.2f, 2.5f, 1.3f, 80f, 30f, 0f, 1f, 0, 0f, 0f, true, 60f, 0.01f));
             l.Add(T("Flat rocks", "Assets/Models/Rocks/sand_rocks_small_01/sand_rocks_small_01_lod.gltf", 0.8f, 1.6f, 9f, 260f, 0f, 0f, 1f, 0, 0f, 0f, true, 50f, 0.25f));
+            // the litter of the groves: dead fronds on the sand (tools/palm-gen.py --litter)
+            l.Add(T("Palm litter", "Assets/Models/Palms/palm_litter_a/palm_litter_a.gltf", 0.7f, 1.2f, 1.5f, 110f, 45f, 0f, 0.3f, 0, 0f, 0f, true, 50f, 0.0f));
+            l.Add(T("Palm litter pile", "Assets/Models/Palms/palm_litter_b/palm_litter_b.gltf", 0.7f, 1.1f, 3f, 110f, 45f, 0f, 0.3f, 0, 0f, 0f, true, 50f, 0.0f));
             l.Add(T("Rock formation", "Assets/Models/Rocks/coast_rocks_02/coast_rocks_02_lod.gltf", 0.3f, 0.45f, 40f, 1200f, 0f, 0f, 1f, 2, 0f, 0f, false, 80f, 1.5f));
             foreach (var t in l) t.Cutout = !(t.Name.StartsWith("Boulder") || t.Name == "Cliff" || t.Name == "Stones" || t.Name == "Pebbles" || t.Name == "Flat rocks" || t.Name == "Rock formation" || t.Name == "Dead trunk");   // rocks and bare wood are opaque
             return l;
@@ -398,18 +489,18 @@ namespace VortexEditor.Shell
         {
             var specs = new List<Spec>();
             float ox0 = -150f, oz0 = -140f, ox1 = 170f, oz1 = 130f;   // the oasis rectangle
-            Func<float, float, float> grove = (x, z) => Clamp01(0.55f + 0.6f * Fbm(x * 0.025f + 3f, z * 0.025f + 5f, 3));
+            Func<float, float, float> grove = (x, z) => Clamp01(0.40f + 0.8f * Fbm(x * 0.025f + 3f, z * 0.025f + 5f, 3));   // groves and real clearings: the reference's sunlit sand between the trunks
             // palms: a dense ring from the water line to ~10 m up, thinning outwards; palm groves beyond the ring
             for (int i = 0; i < 6; i++)
             {
                 int k = i;
-                specs.Add(new Spec { Type = types[k], Candidates = k == 5 ? 900 : 650, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) =>
+                specs.Add(new Spec { Type = types[k], Candidates = k == 5 ? 2000 : 1500, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) =>
                 {
                     if (hw < 0.35f || hw > 12f || ny < 0.85f) return 0f;
                     float g = grove(x, z);                                        // groves and clearings
-                    float ring = hw < 4f ? 0.55f : 0.55f * (1f - (hw - 4f) / 8f);   // densest just above the water
+                    float ring = hw < 4f ? 0.85f : 0.85f * (1f - (hw - 4f) / 8f);   // densest just above the water (the reference's thick groves)
                     float strip = Smooth((60f - Math.Abs(x - 20f) * 0.6f - Math.Abs(z + 10f)) / 25f);   // the open sand between the lakes
-                    return ring * Smooth((g - 0.25f) / 0.5f) * (1f - 0.85f * strip) * (Proximity(x, z) < 1.2f ? 1f : 0.15f);
+                    return ring * Smooth((g - 0.15f) / 0.5f) * (1f - 0.85f * strip) * (Proximity(x, z) < 1.2f ? 1f : 0.15f);
                 } });
             }
             // trees and shrubs on the damp ground
@@ -419,10 +510,16 @@ namespace VortexEditor.Shell
                 specs.Add(new Spec { Type = types[k], Candidates = 0, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) =>
                     hw < 0.8f || hw > 14f || ny < 0.85f || Proximity(x, z) > 1.2f ? 0f : 0.45f * grove(x + 50f, z - 30f) });
             }
-            specs.Add(new Spec { Type = types[9], Candidates = 220, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.5f : 0.07f) });
-            specs.Add(new Spec { Type = types[10], Candidates = 350, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.5f : 0.06f) });
-            specs.Add(new Spec { Type = types[11], Candidates = 2500, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.4f || ny < 0.75f ? 0f : (Proximity(x, z) < 1.4f ? 0.55f : 0.12f) * grove(x * 1.5f, z * 1.5f) });
-            specs.Add(new Spec { Type = types[12], Candidates = 500, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.6f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.35f : 0.08f) });
+            // the undergrowth of the groves: shrubs thick under the palms, thinning into the desert
+            specs.Add(new Spec { Type = types[9], Candidates = 5000, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.75f : 0.07f) });
+            specs.Add(new Spec { Type = types[10], Candidates = 6000, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.75f : 0.06f) });
+            specs.Add(new Spec { Type = types[11], Candidates = 2600, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.4f || ny < 0.75f ? 0f : (Proximity(x, z) < 1.4f ? 0.7f : 0.12f) * grove(x * 1.5f, z * 1.5f) });
+            specs.Add(new Spec { Type = types[12], Candidates = 1100, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.6f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.3f ? 0.55f : 0.08f) });
+            // dead fronds and leaves on the grove floor, stones and pebbles along the water line (the reference's shore)
+            specs.Add(new Spec { Type = types[16], Candidates = 2500, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.4f || hw > 12f || ny < 0.8f || Proximity(x, z) > 1.2f ? 0f : 0.6f * grove(x, z) });
+            specs.Add(new Spec { Type = types[24], Candidates = 3000, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.1f || hw > 1.4f ? 0f : 0.7f });
+            specs.Add(new Spec { Type = types[25], Candidates = 4000, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.05f || hw > 1.2f ? 0f : 0.8f });
+            specs.Add(new Spec { Type = types[26], Candidates = 700, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.2f || hw > 2.2f ? 0f : 0.5f });
             // the desert plain: quiver trees, succulents, dead wood (not on the dune slip faces, not on the escarpment's face)
             specs.Add(new Spec { Type = types[13], Candidates = 900, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 1f || ny < 0.88f ? 0f : (Proximity(x, z) > 1.0f && Proximity(x, z) < 2.6f ? 0.3f : 0.03f) });
             specs.Add(new Spec { Type = types[14], Candidates = 900, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 1f || ny < 0.88f ? 0f : (Proximity(x, z) > 1.0f && Proximity(x, z) < 2.6f ? 0.3f : 0.03f) });
@@ -430,8 +527,8 @@ namespace VortexEditor.Shell
             specs.Add(new Spec { Type = types[16], Candidates = 3000, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.4f || ny < 0.8f ? 0f : 0.3f });
             specs.Add(new Spec { Type = types[17], Candidates = 500, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.5f || ny < 0.85f ? 0f : (Proximity(x, z) < 2.2f ? 0.25f : 0.05f) });
             // grass at the water
-            specs.Add(new Spec { Type = types[18], Candidates = 16000, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.2f || hw > 6.5f || ny < 0.8f || Proximity(x, z) > 1.15f ? 0f : 0.9f * (0.4f + 0.6f * grove(x - 20f, z + 40f)) });
-            specs.Add(new Spec { Type = types[19], Candidates = 12000, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.12f || hw > 2.8f || ny < 0.8f ? 0f : 0.95f });
+            specs.Add(new Spec { Type = types[18], Candidates = 7000, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.2f || hw > 6.5f || ny < 0.8f || Proximity(x, z) > 1.15f ? 0f : 0.9f * (0.4f + 0.6f * grove(x - 20f, z + 40f)) });
+            specs.Add(new Spec { Type = types[19], Candidates = 6000, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.12f || hw > 2.8f || ny < 0.8f ? 0f : 0.95f });
             // rocks: boulders on the gravel and below the escarpment, cliffs along its edge, stones everywhere, flat rocks on the plains, three formations on the dunes
             for (int i = 20; i < 23; i++)
             {
@@ -441,6 +538,9 @@ namespace VortexEditor.Shell
             }
             specs.Add(new Spec { Type = types[23], Candidates = 700, X0 = -256f, Z0 = -230f, X1 = 256f, Z1 = -140f, Prob = (x, z, hw, ny) => z < -215f || z > -160f ? 0f : 0.4f });
             specs.Add(new Spec { Type = types[24], Candidates = 9000, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.3f ? 0f : 0.3f });
+            // dead fronds under the palms, a few blown out into the sand
+            specs.Add(new Spec { Type = types[28], Candidates = 6000, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.35f || ny < 0.8f ? 0f : (Proximity(x, z) < 1.25f ? 0.6f * grove(x, z) : 0.04f) });
+            specs.Add(new Spec { Type = types[29], Candidates = 1500, X0 = ox0, Z0 = oz0, X1 = ox1, Z1 = oz1, Prob = (x, z, hw, ny) => hw < 0.35f || ny < 0.8f || Proximity(x, z) > 1.2f ? 0f : 0.35f * grove(x, z) });
             specs.Add(new Spec { Type = types[25], Candidates = 9000, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.3f ? 0f : 0.3f });
             specs.Add(new Spec { Type = types[26], Candidates = 500, X0 = -256f, Z0 = -256f, X1 = 256f, Z1 = 256f, Prob = (x, z, hw, ny) => hw < 0.8f || ny < 0.9f ? 0f : (Proximity(x, z) > 1.2f ? 0.25f : 0.05f) });
             specs.Add(new Spec { Type = types[27], Candidates = 60, X0 = -230f, Z0 = -120f, X1 = 230f, Z1 = 230f, Prob = (x, z, hw, ny) => hw < 6f || Proximity(x, z) < 1.6f ? 0f : 0.5f });
@@ -462,6 +562,7 @@ namespace VortexEditor.Shell
                     if (p <= 0f || rng.NextDouble() >= p) continue;
                     var pos = new NVec3(x, h, z);
                     if (s.Type.MinSpacing > 0f && layer.AnyWithin(pos, s.Type.MinSpacing)) continue;
+                    if (s.Type.Name.StartsWith("Palm") && TooCloseToAnyPalm(data, pos, 6.5f)) continue;   // across the palm layers: the reference's groves leave sunlit floor between the trunks
                     float scale = s.Type.MinScale + (float)rng.NextDouble() * (s.Type.MaxScale - s.Type.MinScale);
                     float yaw = (float)(rng.NextDouble() * 360.0), tilt = (float)(rng.NextDouble() * s.Type.MaxTilt), tiltDir = (float)(rng.NextDouble() * 360.0);
                     var rot = FoliageData.Orientation(n, s.Type.AlignToNormal, yaw, tilt, tiltDir);
@@ -484,6 +585,7 @@ namespace VortexEditor.Shell
             var ter = scene == null ? null : TemplateSetupSmoke.Find(scene, e => e.Name == "Oasis Terrain");
             if (ter == null) { log.Log("oasis capture: no oasis in this scene — skipped"); return true; }
             var cam = EditorCameraController.Instance;
+            Editor.DllWrapper.VortexAPI.SetPostMainView(true);   // the pictures are the game's: the grade, bloom and FXAA apply in the viewport as they do in play (off, the editor's build view stays clean)
             float px = cam.PositionX, py = cam.PositionY, pz = cam.PositionZ, yaw0 = cam.Yaw, pitch0 = cam.Pitch;
             bool gridWas = EditorViewportService.Instance.IsGridVisible, gizmosWere = EditorViewportService.Instance.AreGizmosVisible;
             bool playing = false;
@@ -507,17 +609,85 @@ namespace VortexEditor.Shell
                 if (gridWas) EditorViewportService.Instance.ToggleGrid();   // no editor grid across the sky in the pictures
                 EditorViewportService.Instance.AreGizmosVisible = false;    // no light / particle icons either
                 // a fresh editor loads the 28 models after its first frames: wait until the vegetation draws
-                Look(cam, At(ter, 205f, 150f, 42f), new Vector3(0f, WaterLevel - 2f, -8f));
-                for (int i = 0; i < 80 && FoliageService.LastInstancesDrawn == 0; i++) { EditorViewportSession.RequestResubmit(); await Task.Delay(400); }
+                Look(cam, At(ter, -235f, 125f, 48f), new Vector3(45f, WaterLevel, -55f));   // from the west, the sun to the left: the dunes side-lit (from the north-east it stood behind the camera and flattened everything)
+                int waited = 0;
+                for (; waited < 80 && FoliageService.LastInstancesDrawn == 0; waited++) { EditorViewportSession.RequestResubmit(); await Task.Delay(400); }
+                if (FoliageService.LastInstancesDrawn == 0)
+                {
+                    // the built-in checks before this one (scene switch, export, play + stop) can leave the vegetation's
+                    // runtimes without their models: rebuild them from scratch and wait once more
+                    var fol = TemplateSetupSmoke.Find(scene, e => e.GetComponent<FoliageComponent>() != null);
+                    log.LogWarning("oasis capture: no vegetation drawn after " + waited + " waits — foliage entity " + (fol != null ? fol.Name + " active=" + fol.IsActive + " hidden=" + fol.IsHiddenInEditor + " enabled=" + (fol.GetComponent<FoliageComponent>()?.IsEnabled) : "MISSING") + "; rebuilding the runtimes");
+                    FoliageService.Clear();
+                    for (waited = 0; waited < 40 && FoliageService.LastInstancesDrawn == 0; waited++) { EditorViewportSession.RequestResubmit(); await Task.Delay(400); }
+                }
+                log.Log("oasis capture: " + FoliageService.LastInstancesDrawn + " vegetation instances drawn before the pictures (" + FoliageService.LastDrawCalls + " draws, " + waited + " waits)");
                 await SmokeRegistry.Settle(1500);
-                // the reference view: from the dunes east of the lakes, the sun behind the camera, both lakes and the palms ahead
-                Look(cam, At(ter, 205f, 150f, 42f), new Vector3(0f, WaterLevel - 2f, -8f));
+                // the reference's aerial view: high over the dunes south-east of the oasis, the lakes in the middle distance, the
+                // dune sea and the mountains behind
+                Look(cam, At(ter, 330f, 300f, 150f), new Vector3(-10f, WaterLevel, -30f));
                 await SmokeRegistry.Settle(2500);
+                await CameraSkySmoke.Sample("oasis_aerial.bmp", 0.5, 0.5);
+                // the reference view: from the dunes east of the lakes, the sun behind the camera, both lakes and the palms ahead
+                Look(cam, At(ter, -235f, 125f, 48f), new Vector3(45f, WaterLevel, -55f));   // from the west, the sun to the left: the dunes side-lit (from the north-east it stood behind the camera and flattened everything)
+                await SmokeRegistry.Settle(1500);
                 await CameraSkySmoke.Sample("oasis_wide.bmp", 0.5, 0.5);
                 // at the west lake's south shore, eye height, across the water to the palms on the far bank
                 Look(cam, At(ter, -24f, -58f, 1.7f), new Vector3(-34f, WaterLevel + 0.3f, 40f));
                 await SmokeRegistry.Settle(800);
                 await CameraSkySmoke.Sample("oasis_shore.bmp", 0.5, 0.5);
+                // the grove: eye height on the grove floor west of the big lake, looking INTO the low sun through the crowns —
+                // long shadows towards the camera, sun shafts, the ferns lit from behind (the reference's grove pictures)
+                {
+                    var sunE = TemplateSetupSmoke.Find(scene, e => e.Name == "Sun");
+                    var toSunDir = new Vector3(0.43f, 0.0f, 0.55f);
+                    if (sunE != null)
+                    {
+                        float yd = sunE.Transform.LocalRotation.Y * (float)Math.PI / 180f, pd = sunE.Transform.LocalRotation.X * (float)Math.PI / 180f;
+                        // the light travels along the entity's forward; towards the sun is the opposite, flattened
+                        var fwd = new Vector3((float)(Math.Sin(yd) * Math.Cos(pd)), (float)(-Math.Sin(pd)), (float)(Math.Cos(yd) * Math.Cos(pd)));
+                        toSunDir = new Vector3(-fwd.X, 0f, -fwd.Z);
+                    }
+                    float tl = (float)Math.Sqrt(toSunDir.X * toSunDir.X + toSunDir.Z * toSunDir.Z); if (tl < 1e-3f) tl = 1f;
+                    toSunDir = new Vector3(toSunDir.X / tl, 0f, toSunDir.Z / tl);
+                    // the densest spot of the palm belt: the palm with the most palms within 20 m
+                    float gx = -96f, gz = 6f;
+                    {
+                        var fol3 = TemplateSetupSmoke.Find(scene, e => e.GetComponent<FoliageComponent>() != null);
+                        FoliageData fd3;
+                        if (fol3 != null && FoliageService.TryGetData(fol3, out fd3))
+                        {
+                            var pts = new List<Vector3>();
+                            foreach (var ly in fd3.Layers) if (ly.TypeName.StartsWith("Palm")) for (int k = 0; k < ly.Count; k++) pts.Add(new Vector3(ly.Instances[k].Position.X, ly.Instances[k].Position.Y, ly.Instances[k].Position.Z));
+                            int best = -1, bestN = -1;
+                            for (int k = 0; k < pts.Count; k += 5)
+                            {
+                                int cnt = 0;
+                                for (int q = 0; q < pts.Count; q++) { float ddx = pts[q].X - pts[k].X, ddz = pts[q].Z - pts[k].Z; if (ddx * ddx + ddz * ddz < 400f) cnt++; }
+                                if (cnt > bestN) { bestN = cnt; best = k; }
+                            }
+                            if (best >= 0) { gx = pts[best].X; gz = pts[best].Z; log.Log("oasis grove: densest spot (" + gx.ToString("0") + ", " + gz.ToString("0") + "), " + bestN + " palms within 20 m"); }
+                        }
+                    }
+                    // look 50° off the sun: the light rakes across the frame, the trunks throw their shadows towards the camera's side
+                    const float rot = 28f * (float)Math.PI / 180f;   // the sun in the frame's upper corner: shafts, backlit fronds, the shadows raking towards the camera
+                    var viewDir = new Vector3(toSunDir.X * (float)Math.Cos(rot) - toSunDir.Z * (float)Math.Sin(rot), 0f, toSunDir.X * (float)Math.Sin(rot) + toSunDir.Z * (float)Math.Cos(rot));
+                    var eye = At(ter, gx - viewDir.X * 3f + viewDir.Z * 2.5f, gz - viewDir.Z * 3f - viewDir.X * 2.5f, 1.6f);
+                    Look(cam, eye, new Vector3(eye.X + viewDir.X * 30f, eye.Y + 6.5f, eye.Z + viewDir.Z * 30f));
+                    await SmokeRegistry.Settle(1200);
+                    await CameraSkySmoke.Sample("oasis_grove.bmp", 0.5, 0.5);
+                    // the same frame without the volumetric haze, then without the fog's sun glow and the bloom: which of them whites out the sun's side?
+                    {
+                        var stg = scene.Settings;
+                        bool vol = stg.VolumetricEnabled; float glow = stg.FogSunGlow, bloom = stg.BloomIntensity;
+                        stg.VolumetricEnabled = false; stg.Apply(); await SmokeRegistry.Settle(700); await CameraSkySmoke.Sample("oasis_grove_novol.bmp", 0.5, 0.5);
+                        stg.FogSunGlow = 0f; stg.BloomIntensity = 0f; stg.Apply(); await SmokeRegistry.Settle(700); await CameraSkySmoke.Sample("oasis_grove_noglow.bmp", 0.5, 0.5);
+                        stg.VolumetricEnabled = vol; stg.FogSunGlow = glow; stg.BloomIntensity = bloom; stg.Apply(); await SmokeRegistry.Settle(400);
+                        // the grade: the same frame nearly grey — proves the post colour grade reaches the picture (it seemed not to on 2026-10-11)
+                        float sat = stg.Saturation; stg.Saturation = 0.3f; stg.Apply(); await SmokeRegistry.Settle(500); await CameraSkySmoke.Sample("oasis_grove_desat.bmp", 0.5, 0.5);
+                        stg.Saturation = sat; stg.Apply(); await SmokeRegistry.Settle(300);
+                    }
+                }
                 // close-ups: the nearest bush and the nearest palm, the sun behind the camera
                 CloseUp(cam, ter, "Searsia burchellii", 4.5f, 1.4f);
                 await SmokeRegistry.Settle(800);
@@ -525,6 +695,41 @@ namespace VortexEditor.Shell
                 CloseUp(cam, ter, "Palm straight", 14f, 6f);
                 await SmokeRegistry.Settle(800);
                 await CameraSkySmoke.Sample("oasis_palm.bmp", 0.5, 0.5);
+                // a palm base from 3 m: the trunk must stand IN the sand (trunks floated on 2026-10-11) — and the numbers behind it
+                {
+                    var fol2 = TemplateSetupSmoke.Find(scene, e => e.GetComponent<FoliageComponent>() != null);
+                    FoliageData fd2;
+                    if (fol2 != null && FoliageService.TryGetData(fol2, out fd2))
+                    {
+                        var layer = fd2.Layer("Palm straight", false);
+                        if (layer != null && layer.Count > 0)
+                        {
+                            var inst = layer.Instances[layer.Count / 2];
+                            float gh; TerrainService.TryHeight(ter, inst.Position.X, inst.Position.Z, out gh);
+                            log.Log("oasis base: instance y " + inst.Position.Y.ToString("0.00") + ", terrain " + gh.ToString("0.00") + " at (" + inst.Position.X.ToString("0.0") + ", " + inst.Position.Z.ToString("0.0") + "), scale " + inst.Scale.ToString("0.00"));
+                            // the engine-side mesh: does the imported palm start at y 0 as the file says?
+                            var subs = SceneRenderService.LoadModelSubmeshes("Assets/Models/Palms/date_palm_a/date_palm_a.gltf");
+                            if (subs != null)
+                                for (int si = 0; si < subs.Length; si++)
+                                {
+                                    float sx, sy, sz, cx, cy, cz;
+                                    Editor.DllWrapper.VortexAPI.GetMeshBounds(subs[si].MeshId, out sx, out sy, out sz);
+                                    Editor.DllWrapper.VortexAPI.GetMeshBoundsCenter(subs[si].MeshId, out cx, out cy, out cz);
+                                    log.Log("oasis base: palm submesh " + si + " mesh " + subs[si].MeshId + " size (" + sx.ToString("0.00") + ", " + sy.ToString("0.00") + ", " + sz.ToString("0.00") + ") centre (" + cx.ToString("0.00") + ", " + cy.ToString("0.00") + ", " + cz.ToString("0.00") + ") bottom y " + (cy - sy * 0.5f).ToString("0.00"));
+                                }
+                            var target = new Vector3(inst.Position.X, inst.Position.Y + 0.5f, inst.Position.Z);
+                            Look(cam, At(ter, inst.Position.X + 2.2f, inst.Position.Z + 2.2f, 0.7f), target);
+                            await SmokeRegistry.Settle(800);
+                            await CameraSkySmoke.Sample("oasis_base.bmp", 0.5, 0.5);
+                            // the same view without the far dunes, then without the oasis terrain: which sheet is the visible floor?
+                            var farT = TemplateSetupSmoke.Find(scene, e => e.Name == "Far Dunes");
+                            if (farT != null) { farT.IsActive = false; EditorViewportSession.RequestResubmit(); await SmokeRegistry.Settle(800); await CameraSkySmoke.Sample("oasis_base_nofar.bmp", 0.5, 0.5); farT.IsActive = true; }
+                            ter.IsActive = false; EditorViewportSession.RequestResubmit(); await SmokeRegistry.Settle(800); await CameraSkySmoke.Sample("oasis_base_nooasis.bmp", 0.5, 0.5); ter.IsActive = true;
+                            EditorViewportSession.RequestResubmit(); await SmokeRegistry.Settle(600);
+                            log.Log("oasis base: chunk submits last frame " + TerrainService.LastChunkSubmits);
+                        }
+                    }
+                }
                 // across the east lake towards the escarpment
                 Look(cam, At(ter, 40f, 30f, 1.8f), new Vector3(90f, WaterLevel + 2f, -120f));
                 await SmokeRegistry.Settle(800);
@@ -548,7 +753,7 @@ namespace VortexEditor.Shell
                     await SmokeRegistry.Settle(3500);
                     await CameraSkySmoke.Sample("oasis_sandstorm.bmp", 0.5, 0.5);
                     VortexEditor.Claude.Tools.EnvironmentTools.ApplyWeather(scene, dusk, 1f);
-                    Look(cam, At(ter, 205f, 150f, 42f), new Vector3(0f, WaterLevel - 2f, -8f));
+                    Look(cam, At(ter, -235f, 125f, 48f), new Vector3(45f, WaterLevel, -55f));   // from the west, the sun to the left: the dunes side-lit (from the north-east it stood behind the camera and flattened everything)
                     await SmokeRegistry.Settle(1200);
                     await CameraSkySmoke.Sample("oasis_dusk.bmp", 0.5, 0.5);
                     VortexEditor.Claude.Tools.EnvironmentTools.ApplyWeather(scene, clear, 1f);
@@ -605,11 +810,20 @@ namespace VortexEditor.Shell
                         if (d < best) { best = d; nearest = e; }
                     }
                     int count = 0; foreach (var e in scene.Entities) if (e != null && e.Name.StartsWith("Zombie", StringComparison.Ordinal) && e.GetComponent<Script>() != null) count++;
+                    {
+                        // the player must stand on the sand, not fall through it (reported 2026-10-11)
+                        float gy; bool onTer = TerrainService.TryHeight(ter, pp.X, pp.Z, out gy);
+                        float dyp = onTer ? pp.Y - gy : float.NaN;
+                        if (!onTer || dyp < -0.5f || dyp > 6f) log.LogError("oasis play: the player is " + (onTer ? dyp.ToString("0.00") + " m above the ground" : "off the terrain") + " after 6.5 s of play (y " + pp.Y.ToString("0.00") + ") — fell through?");
+                        else log.Log("oasis play: the player stands " + dyp.ToString("0.00") + " m above the ground after 6.5 s of play (y " + pp.Y.ToString("0.00") + ")");
+                    }
                     // the game camera renders in play: the infected come into the player's view on their own
                     await CameraSkySmoke.Sample("oasis_zombie.bmp", 0.5, 0.5);
                     log.Log("oasis capture: " + count + " zombies in play, nearest " + (nearest != null ? best.ToString("0") + " m from the player" : "none"));
                 }
-                log.Log("oasis capture: wide / shore / east lake / dunes / top captured; " + FoliageService.LastInstancesDrawn + " instances in the last frame, " + FoliageService.LastDrawCalls + " draws");
+                log.Log("oasis capture: wide / shore / east lake / dunes / top captured; " + FoliageService.LastInstancesDrawn + " instances in the last frame, " + FoliageService.LastDrawCalls + " draws, " + Editor.DllWrapper.VortexAPI.CurrentFPS + " fps in the editor viewport");
+                // ---- the performance probe: the frame rate of the wide view with one feature at a time switched off ----
+                await PerfProbe(scene, ter, cam, log);
                 return true;
             }
             finally
@@ -640,6 +854,57 @@ namespace VortexEditor.Shell
             float gy; if (!TerrainService.TryHeight(ter, from.X, from.Z, out gy)) gy = target.Y;
             from.Y = Math.Max(gy + 1.6f, target.Y - height * 0.3f);
             Look(cam, from, target);
+        }
+
+        /// <summary>Every camera under <paramref name="e"/> sees at least <paramref name="far"/> metres.</summary>
+        private static void SetFarClip(GameEntity e, float far)
+        {
+            if (e == null) return;
+            var cam = e.GetComponent<Camera>();
+            if (cam != null && cam.FarClip < far) cam.FarClip = far;
+            if (e.Children != null) foreach (var c in e.Children) SetFarClip(c, far);
+        }
+
+        /// <summary>Where the milliseconds go: the frame rate of the wide view, then with one feature at a time switched off
+        /// (volumetric fog, FXAA, soft → hard → no sun shadows, the vegetation, the far dunes, the water, SSAO + bloom), everything
+        /// restored afterwards. The renderer's fps counter updates once a second, so every reading waits two.</summary>
+        private static async Task PerfProbe(Scene scene, GameEntity ter, EditorCameraController cam, ConsoleService log)
+        {
+            var st = scene.Settings;
+            var sunE = TemplateSetupSmoke.Find(scene, e => e.GetComponent<Light>() != null && e.GetComponent<Light>().LightType == LightType.Directional);
+            var sun = sunE?.GetComponent<Light>();
+            var fol = TemplateSetupSmoke.Find(scene, e => e.GetComponent<FoliageComponent>() != null);
+            var far = TemplateSetupSmoke.Find(scene, e => e.Name == "Far Dunes");
+            var lakes = new List<GameEntity>();
+            foreach (var e in scene.Entities) if (e != null && e.GetComponent<WaterComponent>() != null) lakes.Add(e);
+            Look(cam, At(ter, -235f, 125f, 48f), new Vector3(45f, WaterLevel, -55f));   // from the west, the sun to the left: the dunes side-lit (from the north-east it stood behind the camera and flattened everything)
+            var sb = new System.Text.StringBuilder();
+            async Task<int> Read(string what)
+            {
+                EditorViewportSession.RequestResubmit();
+                await SmokeRegistry.Settle(2300);
+                int fps = Editor.DllWrapper.VortexAPI.CurrentFPS;
+                sb.Append(what).Append(' ').Append(fps).Append(" fps | ");
+                return fps;
+            }
+            await Read("baseline");
+            bool vol = st.VolumetricEnabled; st.VolumetricEnabled = false; st.Apply(); await Read("no volumetrics"); st.VolumetricEnabled = vol; st.Apply();
+            bool aa = st.AntiAliasEnabled; st.AntiAliasEnabled = false; st.Apply(); await Read("no FXAA"); st.AntiAliasEnabled = aa; st.Apply();
+            if (sun != null)
+            {
+                var shadow = sun.ShadowType;
+                sun.ShadowType = ShadowType.Hard; await Read("hard sun shadows");
+                sun.ShadowType = ShadowType.None; await Read("no sun shadows");
+                sun.ShadowType = shadow;
+            }
+            if (fol != null) { fol.IsActive = false; await Read("no vegetation"); fol.IsActive = true; }
+            if (far != null) { far.IsActive = false; await Read("no far dunes"); far.IsActive = true; }
+            foreach (var l in lakes) l.IsActive = false; await Read("no water"); await Read("no water (2nd read)"); foreach (var l in lakes) l.IsActive = true;
+            bool gi = st.GiEnabled; st.GiEnabled = false; st.Apply(); await Read("no GI"); st.GiEnabled = gi; st.Apply();
+            bool ao = st.AoEnabled, bloom = st.BloomEnabled; st.AoEnabled = false; st.BloomEnabled = false; st.Apply(); await Read("no SSAO + bloom"); st.AoEnabled = ao; st.BloomEnabled = bloom; st.Apply();
+            EditorViewportSession.RequestResubmit();
+            await SmokeRegistry.Settle(800);
+            log.Log("oasis perf: " + sb.ToString());
         }
 
         private static Vector3 At(GameEntity ter, float x, float z, float above)

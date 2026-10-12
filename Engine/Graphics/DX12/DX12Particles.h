@@ -48,6 +48,8 @@ namespace vortex::graphics::dx12
 		{
 			DirectX::XMFLOAT3 fog_color{ 0, 0, 0 }; float fog_density{ 0 };
 			float fog_height_y{ 0 }, fog_height_falloff{ 0 };
+			float scene_exposure{ 0.5f }, fog_sun_glow{ 0 };   // the standard shader's pre-tonemap exposure and fog sun glow
+			u32 tonemapper{ 0 };                                // 0 = ACES fit, 1 = PBR Neutral
 			DirectX::XMFLOAT3 sun_direction{ 0.3f, -1.0f, 0.5f }; float sun_intensity{ 1 };
 			DirectX::XMFLOAT3 sun_color{ 1, 1, 1 }; float ambient{ 0.3f };
 			u32 point_lights{ 0 }, spot_lights{ 0 };
@@ -82,11 +84,10 @@ namespace vortex::graphics::dx12
 
 		// A copy of the pass's depth buffer as a shader resource for other effect passes (decals, #120); {} when unavailable.
 		D3D12_GPU_DESCRIPTOR_HANDLE scene_depth_srv(ID3D12GraphicsCommandList* cmd, ID3D12Resource* depth);
-
-	private:
-		static constexpr u32 SNAP_SLOTS = 4;
-		static constexpr u32 DEPTH_COPIES = 4;    // distinct target sizes per frame (main view + previews)
-
+		// A copy of the pass's COLOUR target so far (same format), sampled by the water for refraction / SSR (#200).
+		// `color` must be in RENDER_TARGET state; it is returned to it.
+		D3D12_GPU_DESCRIPTOR_HANDLE scene_color_srv(ID3D12GraphicsCommandList* cmd, ID3D12Resource* color);
+		// a copy of a pass's depth or colour target (public: the GI pass reads the last colour copy next frame)
 		struct DepthCopy
 		{
 			ComPtr<ID3D12Resource> texture;      // R32_TYPELESS copy of a pass's depth, sampled as R32_FLOAT
@@ -96,7 +97,15 @@ namespace vortex::graphics::dx12
 			D3D12_CPU_DESCRIPTOR_HANDLE cpu{};
 			D3D12_GPU_DESCRIPTOR_HANDLE gpu{};
 			bool slot{ false };                  // SRV slot reserved in the registry heap (never freed; reused in place)
+			DXGI_FORMAT format{ DXGI_FORMAT_UNKNOWN };   // colour copies only: the source's format
 		};
+		// the entry the last scene_color_srv call used (the GI pass reads it next frame); null until a copy was made
+		DepthCopy* last_scene_color() { return m_last_scene_color; }
+
+	private:
+		static constexpr u32 SNAP_SLOTS = 4;
+		static constexpr u32 DEPTH_COPIES = 4;    // distinct target sizes per frame (main view + previews)
+
 		struct Snap
 		{
 			ComPtr<ID3D12Resource> readback;
@@ -110,6 +119,7 @@ namespace vortex::graphics::dx12
 		bool create_root_signature();
 		bool create_pipelines(DXGI_FORMAT rtv_format, DXGI_FORMAT dsv_format);
 		DepthCopy* copy_depth(ID3D12GraphicsCommandList* cmd, ID3D12Resource* depth);
+		DepthCopy* copy_color(ID3D12GraphicsCommandList* cmd, ID3D12Resource* color);
 		bool ensure_snap_target(u32 w, u32 h);
 
 		ID3D12Device* m_device{ nullptr };
@@ -130,6 +140,8 @@ namespace vortex::graphics::dx12
 		D3D12_INDEX_BUFFER_VIEW m_ribbon_ibv{};
 
 		DepthCopy m_depth_copies[DEPTH_COPIES];
+		DepthCopy m_color_copies[2];   // the colour target so far, per size/format (#200)
+		DepthCopy* m_last_scene_color{ nullptr };
 
 		// collision depth snapshot: a small R32_FLOAT target + a readback ring
 		ComPtr<ID3D12Resource> m_snap_texture;

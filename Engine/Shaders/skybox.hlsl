@@ -11,8 +11,11 @@ cbuffer SkyboxConstants : register(b0)
     float3 HorizonColor;   float Padding2;
     float3 GroundColor;    float Padding3;
     float3 SunDirection;   float SunIntensity;
-    float3 SunColor;       float Padding4;
-    float4 Params;         // x: 1 = sample the equirect texture (#326), y: exposure, z: yaw offset (radians)
+    float3 SunColor;       float Tonemapper;   // the HDR path's curve: 0 = ACES fit, 1 = PBR Neutral
+    float4 Params;         // x: 1 = sample the equirect texture (#326), y: exposure, z: yaw offset (radians), w: > 0 = HDR, tonemap with this scene exposure
+    float4 Haze;           // aerial perspective on the HDR sky: rgb the scene fog colour, w its density (0 = off)
+    float4 GlowDir;        // xyz the direction the sun's light travels, w the fog's sun glow
+    float4 GlowColor;      // rgb the sun's colour
 };
 
 Texture2D SkyTexture : register(t0);
@@ -53,7 +56,45 @@ float4 SkyPS(VS_OUT input) : SV_TARGET
     {
         float u = atan2(dir.x, dir.z) / (2.0 * PI) + 0.5 + Params.z / (2.0 * PI);
         float v = acos(clamp(y, -1.0, 1.0)) / PI;
-        return float4(SkyTexture.SampleLevel(SkySampler, float2(u, v), 0).rgb * Params.y, 1.0);
+        float3 sky = SkyTexture.SampleLevel(SkySampler, float2(u, v), 0).rgb * Params.y;
+        if (Params.w > 0.0 && Haze.w > 0.0)
+        {
+            // aerial perspective on the sky: the horizon whitens into the scene's haze (the path through the air grows as
+            // 1 / sin(elevation)), the sun glows in it, the zenith keeps its blue
+            float h = max(y, 0.0);
+            float f = 1.0 - exp(-Haze.w * 40.0 / (h + 0.04));
+            float mu = saturate(dot(dir, normalize(-GlowDir.xyz)));
+            float3 hz = Haze.rgb + GlowColor.rgb * (GlowDir.w * (0.12 * mu * mu + 0.88 * pow(mu, 10.0)));
+            sky = lerp(sky, hz, f);
+        }
+        if (Params.w < 0.0) sky = pow(saturate(sky), 1.0 / 2.2);   // a float picture the classic way: gamma-encoded, clamped
+        else if (Params.w > 0.0)
+        {
+            // an HDR picture: the scene exposure + ACES + gamma of the lit surfaces, so the sky and the world agree
+            float3 x = max(sky * Params.w, 0.0);
+            if (Tonemapper > 0.5)
+            {
+                // Khronos PBR Neutral, as in standard.hlsl
+                float mn = min(x.r, min(x.g, x.b));
+                x -= mn < 0.08 ? mn - 6.25 * mn * mn : 0.04;
+                float peak = max(x.r, max(x.g, x.b));
+                if (peak >= 0.76)
+                {
+                    float newPeak = 1.0 - 0.0576 / (peak + 0.24 - 0.76);
+                    x *= newPeak / peak;
+                    float g = 1.0 - 1.0 / (0.15 * (peak - newPeak) + 1.0);
+                    x = lerp(x, newPeak * float3(1.0, 1.0, 1.0), g);
+                }
+                sky = pow(saturate(x), 1.0 / 2.2);
+            }
+            else
+            {
+                float3 a = x * (x + 0.0245786) - 0.000090537;
+                float3 b = x * (0.983729 * x + 0.4329510) + 0.238081;
+                sky = pow(max(saturate(a / b), 0.0), 1.0 / 2.2);
+            }
+        }
+        return float4(sky, 1.0);
     }
 
     // Sky to horizon to ground gradient

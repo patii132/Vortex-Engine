@@ -35,7 +35,17 @@ namespace Editor.DllWrapper
         private static extern void ShutdownRenderViewport();
 
         public static bool InitRenderViewport(System.IntPtr hwnd, uint width, uint height) 
-            => InitializeRenderViewport(hwnd, width, height);
+        {
+            // texture compression (#179): the cache folder before the first picture loads; VORTEX_TEXTURE_COMPRESSION=0 turns it off
+            try
+            {
+                string off = System.Environment.GetEnvironmentVariable("VORTEX_TEXTURE_COMPRESSION");
+                ConfigureTextureCompression(off != "0", 256);
+                SetTextureCacheDirectory(System.IO.Path.Combine(Editor.Core.Services.EditorPaths.VortexAppData, "texcache"));
+            }
+            catch { }
+            return InitializeRenderViewport(hwnd, width, height);
+        }
         public static void ResizeRender(uint width, uint height) => ResizeRenderViewport(width, height);
         public static void RenderOnce() => RenderFrame();
         /// <summary>
@@ -858,6 +868,18 @@ namespace Editor.DllWrapper
             float density, float heightY, float heightFalloff);
 
         [DllImport(_dllName, CallingConvention = _cc)]
+        private static extern void SetSceneExposure(float multiplier);
+
+        [DllImport(_dllName, CallingConvention = _cc)]
+        private static extern void SetFogSunGlow(float glow);
+
+        [DllImport(_dllName, CallingConvention = _cc)]
+        private static extern void SetTonemapper(int mode);
+
+        [DllImport(_dllName, CallingConvention = _cc)]
+        private static extern void SetDirectionalShadowSoftness(float texels);
+
+        [DllImport(_dllName, CallingConvention = _cc)]
         private static extern void SetPostFxVignette([MarshalAs(UnmanagedType.I1)] bool enabled,
             float intensity, float smoothness, float roundness, float r, float g, float b);
 
@@ -885,6 +907,9 @@ namespace Editor.DllWrapper
 
         [DllImport(_dllName, CallingConvention = _cc)]
         private static extern void SetSSAO([MarshalAs(UnmanagedType.I1)] bool enabled, float radius, float intensity);
+
+        [DllImport(_dllName, CallingConvention = _cc, EntryPoint = "SetGlobalIllumination")]
+        private static extern void SetGlobalIlluminationNative([MarshalAs(UnmanagedType.I1)] bool enabled, float strength, float radius);
 
         /// <summary>
         /// Clear all dynamic lights. Call at the beginning of each frame before submitting new lights.
@@ -970,6 +995,36 @@ namespace Editor.DllWrapper
             try { SetFogParams(r, g, b, density, heightY, heightFalloff); } catch { }
         }
 
+        /// <summary>Scene exposure in STOPS, applied by the surface shaders (and an HDR sky) before the ACES curve — the
+        /// camera's aperture. 0 = the classic look; +1 doubles the light reaching the tonemapper, so a sunlit desert reads
+        /// bright without the clipping the LDR grading exposure causes. Persistent frame state like the fog.</summary>
+        public static void SetSceneExposureStops(float stops)
+        {
+            float s = stops < -6f ? -6f : (stops > 6f ? 6f : stops);
+            try { SetSceneExposure(0.5f * (float)System.Math.Pow(2.0, s)); } catch { }
+        }
+
+        /// <summary>Aerial perspective: the sun's forward-scatter glow in the fog when looking towards it (0 = the flat fog
+        /// colour; 0.3–0.6 a desert noon, 1–2 a low sun). Persistent like the fog.</summary>
+        public static void SetFogSunGlowStrength(float glow)
+        {
+            try { SetFogSunGlow(glow); } catch { }
+        }
+
+        /// <summary>The tonemapper of every lit surface, particle, decal and the HDR sky: 0 = the ACES fit (the classic look —
+        /// bright saturated colours drift towards white), 1 = Khronos PBR Neutral (hue-preserving; a sunlit desert stays orange).</summary>
+        public static void SetTonemapperMode(int mode)
+        {
+            try { SetTonemapper(mode); } catch { }
+        }
+
+        /// <summary>The sun's shadow softness: the PCF radius in shadow texels. 1 = the classic 3x3 box, 2–8 = a 16-tap Poisson
+        /// disk of that radius (Light ▸ Soft = 4) — a real penumbra under palms instead of a stair-stepped edge.</summary>
+        public static void SetDirectionalShadowSoftnessTexels(float texels)
+        {
+            try { SetDirectionalShadowSoftness(texels); } catch { }
+        }
+
         /// <summary>Post-FX vignette (#29). Persistent renderer state like fog: applies to the editor
         /// viewport, the play-mode window AND shipped games until changed. All effects off = the
         /// untouched (zero-cost) render path.</summary>
@@ -1000,6 +1055,16 @@ namespace Editor.DllWrapper
             try { SetPostFxColorGrade(enabled, exposure, contrast, saturation, temperature, tint); } catch { }
         }
 
+        [DllImport(_dllName, CallingConvention = _cc)]
+        private static extern void SetPostFxAntiAlias([MarshalAs(UnmanagedType.I1)] bool enabled);
+
+        /// <summary>Anti-aliasing (FXAA 3.11 console variant) in the post pass on the LDR picture — nine taps, no history, the
+        /// cheap edge smoothing until temporal AA. Persistent like the other post effects.</summary>
+        public static void SetPostAntiAlias(bool enabled)
+        {
+            try { SetPostFxAntiAlias(enabled); } catch { }
+        }
+
         /// <summary>Post-FX bloom (#30): soft-knee bright-pass -> progressive mip chain -> additive
         /// glow composite. threshold = brightness where glow starts (SDR 0..~1.5), knee = soft width,
         /// intensity = composite strength (0 = bit-exact passthrough), scatter = glow spread (0..1).</summary>
@@ -1028,6 +1093,24 @@ namespace Editor.DllWrapper
         public static void SetAmbientOcclusion(bool enabled, float radius, float intensity)
         {
             try { SetSSAO(enabled, radius, intensity); } catch { }
+        }
+
+        /// <summary>Screen-space global illumination (the first step of the dynamic GI, #257): one bounce of the lit world traced
+        /// in the SSAO pass against the depth, with the radiance of the previous frame — sand warms the trunks, a lit wall lights
+        /// the floor next to it. Needs SSAO on. strength 1 = a physical diffuse bounce, radius = the trace length in metres.</summary>
+        public static void SetGlobalIllumination(bool enabled, float strength, float radius)
+        {
+            try { SetGlobalIlluminationNative(enabled, strength, radius); } catch { }
+        }
+
+        [DllImport(_dllName, CallingConvention = _cc, EntryPoint = "SetGlobalIlluminationBounce")]
+        private static extern void SetGlobalIlluminationBounceNative(float r, float g, float b, [MarshalAs(UnmanagedType.I1)] bool shadowMapBounce);
+
+        /// <summary>#257 step 2: the bounce gathered from the sun's shadow map — every sunlit point the sun sees lights its
+        /// surroundings with this ground colour (the scene's bounce colour); off = the screen-space trace alone.</summary>
+        public static void SetGlobalIlluminationBounce(float r, float g, float b, bool shadowMapBounce)
+        {
+            try { SetGlobalIlluminationBounceNative(r, g, b, shadowMapBounce); } catch { }
         }
 
         #endregion
@@ -1073,12 +1156,27 @@ namespace Editor.DllWrapper
         [DllImport(_dllName, CallingConvention = _cc)]
         private static extern void SetSkyboxTexture(long textureId, float exposure, float rotationDegrees);
 
+        [DllImport(_dllName, CallingConvention = _cc)]
+        private static extern void SetSkyboxTextureHdr(long textureId, float exposure, float rotationDegrees, int hdr);
+
         /// <summary>Equirect texture sky (#326): the texture the renderer's fullscreen sky pass samples in
         /// <see cref="SkyboxMode.Texture"/>, its exposure and a yaw offset in degrees. The pass draws it behind
         /// everything, centred on whichever camera renders the frame — no sphere mesh, no depth write, no fog.</summary>
         public static void ApplySkyboxTexture(long textureId, float exposure, float rotationDegrees)
         {
             try { SetSkyboxTexture(textureId, exposure, rotationDegrees); } catch (System.EntryPointNotFoundException) { }
+        }
+
+        /// <summary>The same with an HDR flag: a float picture (.hdr) is run through the scene exposure + ACES + gamma by the
+        /// sky pass, so the sky and the lit world share one exposure; an 8-bit picture is shown as it is.</summary>
+        public static void ApplySkyboxTexture(long textureId, float exposure, float rotationDegrees, bool hdr) => ApplySkyboxTexture(textureId, exposure, rotationDegrees, hdr ? 2 : 0);
+
+        /// <summary>hdrMode: 0 = an 8-bit picture shown as it is; 1 = a float picture (.hdr) shown the classic way (gamma-encoded,
+        /// clamped at white); 2 = the float picture run through the scene exposure + the tonemapper like the lit surfaces.</summary>
+        public static void ApplySkyboxTexture(long textureId, float exposure, float rotationDegrees, int hdrMode)
+        {
+            try { SetSkyboxTextureHdr(textureId, exposure, rotationDegrees, hdrMode); }
+            catch (System.EntryPointNotFoundException) { ApplySkyboxTexture(textureId, exposure, rotationDegrees); }
         }
 
         private static bool _skyboxEnabled = false;

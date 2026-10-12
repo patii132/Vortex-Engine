@@ -16,6 +16,12 @@ namespace Editor.DllWrapper
 
         [DllImport(_dllName, CallingConvention = _cc)]
         private static extern long CreateTexturePixels(int width, int height, int srgb, int mips, byte[] rgba);
+        [DllImport(_dllName, CallingConvention = _cc)]
+        private static extern long CreateTexturePixelsEx(int width, int height, int srgb, int mips, int kind, byte[] rgba);
+        [DllImport(_dllName, CallingConvention = _cc)]
+        private static extern void SetTextureCompression(int enabled, int minSize);
+        [DllImport(_dllName, CallingConvention = _cc)]
+        private static extern void SetTextureCacheDir(string dir);
 
         [DllImport(_dllName, CallingConvention = _cc)]
         private static extern int DecodeImageMemory(byte[] data, int length, out int width, out int height, byte[] outRgba, int cap);
@@ -41,10 +47,26 @@ namespace Editor.DllWrapper
         }
 
         /// <summary>An RGBA8 texture from raw pixels (row-major from the top). <see cref="ID.INVALID_ID"/> on failure.</summary>
-        public static long CreateTextureFromPixels(int width, int height, byte[] rgba, bool srgb = false, bool mips = true)
+        /// <summary>Compression kinds for <see cref="CreateTextureFromPixels"/> (#179): 0 = RGBA8 as it is, 1 = colour (BC1), 2 = colour +
+        /// alpha (BC3), 3 = normal map (BC5, the shaders rebuild z), 4 = one channel (BC4).</summary>
+        public const int TextureKindNone = 0, TextureKindColor = 1, TextureKindColorAlpha = 2, TextureKindNormal = 3, TextureKindGray = 4;
+
+        /// <summary>Texture compression policy: off keeps every picture RGBA8; minSize = the smallest side that gets compressed.</summary>
+        public static void ConfigureTextureCompression(bool enabled, int minSize = 256)
+        {
+            try { SetTextureCompression(enabled ? 1 : 0, minSize); } catch { }
+        }
+
+        /// <summary>The folder compressed textures are cached in between runs (the editor passes &lt;appdata&gt;/VortexEngine/texcache).</summary>
+        public static void SetTextureCacheDirectory(string dir)
+        {
+            try { SetTextureCacheDir(dir ?? ""); } catch { }
+        }
+
+        public static long CreateTextureFromPixels(int width, int height, byte[] rgba, bool srgb = false, bool mips = true, int kind = 0)
         {
             if (rgba == null || width <= 0 || height <= 0 || rgba.Length < width * height * 4) return ID.INVALID_ID;
-            try { return CreateTexturePixels(width, height, srgb ? 1 : 0, mips ? 1 : 0, rgba); }
+            try { return kind != 0 ? CreateTexturePixelsEx(width, height, srgb ? 1 : 0, mips ? 1 : 0, kind, rgba) : CreateTexturePixels(width, height, srgb ? 1 : 0, mips ? 1 : 0, rgba); }
             catch (EntryPointNotFoundException) { _terrainApiMissing = true; return ID.INVALID_ID; }
             catch { return ID.INVALID_ID; }
         }

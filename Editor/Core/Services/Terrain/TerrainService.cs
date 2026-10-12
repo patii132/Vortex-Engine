@@ -24,8 +24,26 @@ namespace Editor.Core.Services.Terrain
     /// </summary>
     public static class TerrainService
     {
-        public const int AtlasTile = 512;
-        public const int AtlasSize = AtlasTile * 2;
+        /// <summary>Texels per layer in the 2x2 layer atlas (default 1024 = a 2048² atlas per map; <c>VORTEX_TERRAIN_ATLAS</c> = 512 /
+        /// 1024 / 2048 overrides it). 1024 keeps an 8 m sand tile sharp to ~50 m; 2048 costs four times the memory (3 × 64 MB + mips).</summary>
+        public static readonly int AtlasTile = ReadAtlasTile();
+        public static readonly int AtlasSize = AtlasTile * 2;
+        /// <summary>The atlas gutter the terrain shaders inset by (pad = 1/32 of a quadrant): the builder fills it with the WRAPPED
+        /// texture, so the bilinear footprint and every mip up to the shader's cap stay seamless across tile repeats.</summary>
+        public const int AtlasGutterDiv = 32;
+        private static int ReadAtlasTile()
+        {
+            try
+            {
+                var s = Environment.GetEnvironmentVariable("VORTEX_TERRAIN_ATLAS");
+                int v;
+                if (!string.IsNullOrEmpty(s) && int.TryParse(s, out v) && (v == 256 || v == 512 || v == 1024 || v == 2048)) return v;
+            }
+            catch { }
+            // 2048 per layer (a 4096² atlas) once the atlas is block compressed; 1024 when compression is off (VORTEX_TEXTURE_COMPRESSION=0)
+            try { if (Environment.GetEnvironmentVariable("VORTEX_TEXTURE_COMPRESSION") == "0") return 1024; } catch { }
+            return 2048;
+        }
         private const int GraveFrames = 3;
 
         private sealed class Runtime
@@ -68,6 +86,7 @@ namespace Editor.Core.Services.Terrain
 
         /// <summary>Chunk instances submitted by the last <see cref="Submit"/> (stats, smoke checks).</summary>
         public static int LastChunkSubmits { get; private set; }
+        private static float _farApplied = -1f;   // the far plane last pushed to the view (see Submit)
         /// <summary>Terrains alive in the service.</summary>
         public static int Count => _runtimes.Count;
         /// <summary>Milliseconds the last layer-atlas build took (stats).</summary>
@@ -87,6 +106,17 @@ namespace Editor.Core.Services.Terrain
 
             Vector3 cam = CameraPosition(scene, playLike);
             foreach (var e in scene.Entities) SubmitRecursive(e, cam, playLike);
+
+            // the editor view's far plane follows the largest terrain: a 4 km backdrop is drawn to its edge, not clipped at 1 km
+            float needed = 1000f;
+            foreach (var kv in _runtimes) if (kv.Value.SeenFrame == _frame && kv.Value.Size * 1.5f > needed) needed = kv.Value.Size * 1.5f;
+            if (needed > 20000f) needed = 20000f;
+            if (Math.Abs(RaycastService.EditorFarClip - needed) > 0.5f) RaycastService.EditorFarClip = needed;
+            if (!playLike && Math.Abs(_farApplied - needed) > 0.5f)
+            {
+                _farApplied = needed;
+                try { VortexAPI.SetViewClipPlanes(RaycastService.EditorNearClip, needed); } catch { }
+            }
 
             for (int i = _graveyard.Count - 1; i >= 0; i--)
             {
@@ -286,9 +316,11 @@ namespace Editor.Core.Services.Terrain
                 if (mat != null) { roughFallback += mat.Roughness; roughCount++; }
             }
 
-            long a = VortexAPI.CreateTextureFromPixels(AtlasSize, AtlasSize, albedo, false, true);
-            long nrm = VortexAPI.CreateTextureFromPixels(AtlasSize, AtlasSize, normal, false, true);
-            long r = VortexAPI.CreateTextureFromPixels(AtlasSize, AtlasSize, rough, false, true);
+            // block compressed (#179): albedo BC1, normal BC5 (the terrain shader rebuilds z), roughness BC4 — a 4096² atlas set is
+            // ~38 MB instead of ~256 MB
+            long a = VortexAPI.CreateTextureFromPixels(AtlasSize, AtlasSize, albedo, false, true, VortexAPI.TextureKindColor);
+            long nrm = VortexAPI.CreateTextureFromPixels(AtlasSize, AtlasSize, normal, false, true, VortexAPI.TextureKindNormal);
+            long r = VortexAPI.CreateTextureFromPixels(AtlasSize, AtlasSize, rough, false, true, VortexAPI.TextureKindGray);
             if (rt.AlbedoAtlas != ID.INVALID_ID) _graveyard.Add((rt.AlbedoAtlas, true, _frame));
             if (rt.NormalAtlas != ID.INVALID_ID) _graveyard.Add((rt.NormalAtlas, true, _frame));
             if (rt.RoughnessAtlas != ID.INVALID_ID) _graveyard.Add((rt.RoughnessAtlas, true, _frame));
@@ -353,19 +385,23 @@ namespace Editor.Core.Services.Terrain
             for (int i = 0; i + 3 < px.Length; i += 4) px[i] = px[i + channel];
         }
 
-        /// <summary>Resample an RGBA image into quadrant <paramref name="q"/> of an atlas (bilinear, wraps for tiling textures).</summary>
+        /// <summary>Resample an RGBA image into quadrant <paramref name="q"/> of an atlas (bilinear, wraps for tiling textures).
+        /// The picture fills the quadrant's INNER region (inset by the shader's gutter) and the gutter around it holds the
+        /// wrapped continuation — so a tile repeat is seamless and no mip pulls the neighbouring layer in.</summary>
         private static void Blit(byte[] atlas, int q, byte[] src, int sw, int sh)
         {
             int ox = (q & 1) * AtlasTile, oy = (q >> 1) * AtlasTile;
-            float sx = sw / (float)AtlasTile, sy = sh / (float)AtlasTile;
-            for (int y = 0; y < AtlasTile; y++)
+            int gutter = AtlasTile / AtlasGutterDiv;
+            float inner = AtlasTile - 2f * gutter;
+            float sx = sw / inner, sy = sh / inner;
+            System.Threading.Tasks.Parallel.For(0, AtlasTile, y =>
             {
-                float fy = (y + 0.5f) * sy - 0.5f;
+                float fy = (y - gutter + 0.5f) * sy - 0.5f;
                 int y0 = (int)Math.Floor(fy); float ty = fy - y0;
                 int ya = ((y0 % sh) + sh) % sh, yb = (((y0 + 1) % sh) + sh) % sh;
                 for (int x = 0; x < AtlasTile; x++)
                 {
-                    float fx = (x + 0.5f) * sx - 0.5f;
+                    float fx = (x - gutter + 0.5f) * sx - 0.5f;
                     int x0 = (int)Math.Floor(fx); float tx = fx - x0;
                     int xa = ((x0 % sw) + sw) % sw, xb = (((x0 + 1) % sw) + sw) % sw;
                     int i00 = (ya * sw + xa) * 4, i10 = (ya * sw + xb) * 4, i01 = (yb * sw + xa) * 4, i11 = (yb * sw + xb) * 4;
@@ -376,7 +412,7 @@ namespace Editor.Core.Services.Terrain
                         atlas[o + c] = (byte)(v + 0.5f);
                     }
                 }
-            }
+            });
         }
 
         /// <summary>Fill quadrant <paramref name="q"/> with a colour, optionally dithered by ±<paramref name="noise"/> so a flat

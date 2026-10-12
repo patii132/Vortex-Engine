@@ -34,8 +34,12 @@ namespace VortexEditor.Shell
 
         /// <summary>Hooks for failures that don't pass through the run loop: never-awaited tasks, plus a last-chance
         /// log for fatal ones.</summary>
+        private static bool _installed;
+
         public static void Install()
         {
+            if (_installed) return;
+            _installed = true;
             // (The dispatcher hook is added in Run, after the platform set-up: touching Dispatcher.UIThread before
             // the native platform registers its dispatcher would bind the UI thread to the wrong implementation.)
             TaskScheduler.UnobservedTaskException += (s, e) => { Report(e.Exception, "background task", toast: false); e.SetObserved(); };
@@ -104,11 +108,32 @@ namespace VortexEditor.Shell
             {
                 string dir = Path.Combine(EditorPaths.VortexAppData, "logs");
                 Directory.CreateDirectory(dir);
+                string tail = where == "fatal" || where.StartsWith("burst") ? ConsoleTail(40) : "";
                 File.AppendAllText(Path.Combine(dir, "editor-errors.log"),
-                    DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "  [" + where + "]  " + ex + Environment.NewLine + Environment.NewLine);
+                    DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "  [" + where + "]  " + ex + Environment.NewLine + tail + Environment.NewLine);
             }
             catch { }
             try { Console.Error.WriteLine("[crash-guard] " + where + ": " + ex?.GetType().Name + ": " + ex?.Message); } catch { }
+        }
+
+        /// <summary>The last console lines — what the editor was doing when it went (the fatal log carries them).</summary>
+        private static string ConsoleTail(int lines)
+        {
+            try
+            {
+                var entries = ConsoleService.Instance.Entries;
+                var sb = new System.Text.StringBuilder();
+                sb.Append("  --- the console before it (last ").Append(lines).Append(" lines) ---").Append(Environment.NewLine);
+                int start = Math.Max(0, entries.Count - lines);
+                for (int i = start; i < entries.Count; i++)
+                {
+                    var e = entries[i];
+                    if (e == null) continue;
+                    sb.Append("  ").Append(e.Time).Append(' ').Append(e.LevelTag).Append("  ").Append(e.Message).Append(Environment.NewLine);
+                }
+                return sb.ToString();
+            }
+            catch { return ""; }
         }
 
         [ModuleInitializer]

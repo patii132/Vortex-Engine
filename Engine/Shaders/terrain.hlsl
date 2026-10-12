@@ -33,11 +33,14 @@ cbuffer PerFrame : register(b0)
     float FogHeightY;
     float FogHeightFalloff;
     uint FogMode;
-    float FogPadding;
+    float SceneExposure;   // pre-tonemap multiplier (0.5 = the classic look; <= 0 reads as 0.5)
     float ShadowMapTexel;
-    uint3 ShadowPadding;
+    uint Tonemapper;       // 0 = ACES fit, 1 = PBR Neutral
+    float GiStrength;      // screen-space GI: > 0 = SsaoTex.rgb carries bounce light
+    uint ShadowPadding1;
     float SsaoEnabled;
-    float3 SsaoPadding;
+    float2 SsaoPadding;
+    float FogSunGlow;      // aerial perspective: the sun's glow in the fog (0 = off)
     float4 EnvSky;
     float4 EnvHorizon;
     float4 EnvGround;
@@ -133,12 +136,53 @@ float FogOpticalDepth(float density, float heightY, float k, float3 cam, float3 
     return density * (below + above * meanDensity);
 }
 
+// The scene's tonemapper (Tonemapper in the frame constants): 0 = the ACES fit — the classic look, which pulls bright
+// saturated colours towards white; 1 = Khronos PBR Neutral — hue-preserving with a gentle highlight desaturation, so a
+// sunlit desert stays orange and a red car stays red. The input is the EXPOSED scene colour (scene exposure applied).
+float3 TonemapNeutral(float3 color)
+{
+    const float startCompression = 0.8 - 0.04;
+    const float desaturation = 0.15;
+    float x = min(color.r, min(color.g, color.b));
+    float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+    color -= offset;
+    float peak = max(color.r, max(color.g, color.b));
+    if (peak < startCompression) return color;
+    const float d = 1.0 - startCompression;
+    float newPeak = 1.0 - d * d / (peak + d - startCompression);
+    color *= newPeak / peak;
+    float g = 1.0 - 1.0 / (desaturation * (peak - newPeak) + 1.0);
+    return lerp(color, newPeak * float3(1.0, 1.0, 1.0), g);
+}
+float3 TonemapScene(float3 x, uint mode)
+{
+    if (mode == 1) return saturate(TonemapNeutral(max(x, 0.0)));
+    float3 a = x * (x + 0.0245786) - 0.000090537;
+    float3 b = x * (0.983729 * x + 0.4329510) + 0.238081;
+    return saturate(a / b);
+}
+
+// Aerial perspective: what the fog scatters towards the eye. The flat FogColor, plus the sun's forward-scatter glow when
+// looking towards it (FogSunGlow 0 = off) — the haze brightens and warms around the sun like real air does.
+float3 FogInscatter(float3 worldPos)
+{
+    float3 c = FogColor;
+    if (FogSunGlow > 0.0 && DirectionalIntensity > 0.001)
+    {
+        float3 V = normalize(worldPos - CameraPosition);
+        float mu = saturate(dot(V, normalize(-LightDirection)));
+        float phase = 0.12 * mu * mu + 0.88 * pow(mu, 10.0);
+        c += LightColor * (FogSunGlow * phase);
+    }
+    return c;
+}
+
 float3 ApplyFog(float3 color, float3 worldPos)
 {
     if (FogDensity <= 0.0) return color;
     float optical = FogOpticalDepth(FogDensity, FogHeightY, FogHeightFalloff, CameraPosition, worldPos);
     float f = 1.0 - exp2(-optical);
-    return lerp(color, FogColor, saturate(f));
+    return lerp(color, FogInscatter(worldPos), saturate(f));
 }
 
 // ---------------------------------------------------------------- shadows (standard.hlsl)
@@ -155,6 +199,45 @@ float SampleSpotShadow(float3 worldPos, int slot, float strength, float bias)
     return lerp(1.0, lit, saturate(strength));
 }
 
+// The sun's shadow filter (Light ▸ Soft): softness <= 1 = the classic 3x3 box; above it a 16-tap Poisson disk of that
+// radius in shadow texels — palm shadows on sand get a real penumbra instead of a stair-stepped edge.
+static const float2 PoissonDisk16[16] = { float2(-0.94201624,-0.39906216), float2(0.94558609,-0.76890725), float2(-0.094184101,-0.92938870), float2(0.34495938,0.29387760), float2(-0.91588581,0.45771432), float2(-0.81544232,-0.87912464), float2(-0.38277543,0.27676845), float2(0.97484398,0.75648379), float2(0.44323325,-0.97511554), float2(0.53742981,-0.47373420), float2(-0.26496911,-0.41893023), float2(0.79197514,0.19090188), float2(-0.24188840,0.99706507), float2(-0.81409955,0.91437590), float2(0.19984126,0.78641367), float2(0.14383161,-0.14100790) };
+float CsmPcf(float2 suv, float depth, float atlasTexel, float softness, float zscale, float mpt)
+{
+    float lit = 0.0;
+    if (softness <= 1.01)
+    {
+        [unroll]
+        for (int y = -1; y <= 1; ++y)
+            [unroll]
+            for (int x = -1; x <= 1; ++x)
+                lit += CsmShadowMap.SampleCmpLevelZero(ShadowSampler, suv + float2((float)x, (float)y) * atlasTexel, depth);
+        return lit / 9.0;
+    }
+    // contact hardening (PCSS without a depth read): comparison taps at the receiver's depth minus 0 / 1 / 3 / 9 m over the
+    // widest penumbra tell how far behind the receiver the blockers sit; the Poisson radius grows with that distance — a
+    // trunk's shadow is sharp at its foot and soft where the crown throws it 10 m up. Softness caps the radius (texels).
+    const float tan_a = 0.035;   // the sun's angular radius, widened to 2 degrees as the big engines do
+    float rs = clamp(12.0 * tan_a / mpt, 1.0, softness) * atlasTexel;
+    float sh[4];
+    [unroll]
+    for (int l = 0; l < 4; ++l)
+    {
+        float k = (l == 0) ? 0.0 : (l == 1 ? 1.0 : (l == 2 ? 3.0 : 9.0));
+        float s = 0.0;
+        [unroll]
+        for (int i = 0; i < 4; ++i) s += CsmShadowMap.SampleCmpLevelZero(ShadowSampler, suv + PoissonDisk16[i * 4 + l] * rs, depth - k * zscale);
+        sh[l] = 1.0 - s * 0.25;
+    }
+    if (sh[0] < 0.02) return 1.0;   // nothing in the way anywhere in the search disk
+    float bd = (0.5 * (sh[0] + sh[1]) + (sh[1] + sh[2]) + 3.0 * (sh[2] + sh[3])) / max(sh[0], 0.05);   // the mean blocker distance (m)
+    float r = clamp(bd * tan_a / mpt, 1.0, softness) * atlasTexel;
+    [unroll]
+    for (int i = 0; i < 16; ++i)
+        lit += CsmShadowMap.SampleCmpLevelZero(ShadowSampler, suv + PoissonDisk16[i] * r, depth);
+    return lit / 16.0;
+}
+
 float SampleCascadeShadow(float3 worldPos)
 {
     int count = (int)DirShadowParams.z;
@@ -169,17 +252,15 @@ float SampleCascadeShadow(float3 worldPos)
         float2 suv = ndc.xy * float2(0.5, -0.5) + 0.5;
         if (min(suv.x, suv.y) < 0.02 || max(suv.x, suv.y) > 0.98 || ndc.z > 1.0 || ndc.z < 0.0)
             continue;
-        suv = clamp(suv, ShadowMapTexel * 1.5, 1.0 - ShadowMapTexel * 1.5) * 0.5;
+        float guard = ShadowMapTexel * (max(DirShadowParams.w, 1.0) + 0.5);   // the whole filter stays inside the tile
+        suv = clamp(suv, guard, 1.0 - guard) * 0.5;
         suv += float2((c & 1) != 0 ? 0.5 : 0.0, (c & 2) != 0 ? 0.5 : 0.0);
-        float bias = DirShadowParams.y * (1.0 + (float)c);
+        float bias = DirShadowParams.y * (1.0 + (float)c) * (0.75 + 0.25 * max(DirShadowParams.w, 1.0));   // a wider filter needs more bias on slopes
         float atlasTexel = ShadowMapTexel * 0.5;
-        float lit = 0.0;
-        [unroll]
-        for (int y = -1; y <= 1; ++y)
-            [unroll]
-            for (int x = -1; x <= 1; ++x)
-                lit += CsmShadowMap.SampleCmpLevelZero(ShadowSampler, suv + float2((float)x, (float)y) * atlasTexel, ndc.z - bias);
-        return lerp(1.0, lit / 9.0, saturate(DirShadowParams.x));
+        float4x4 M = CascadeVP[c];
+        float zscale = length(float3(M[0][2], M[1][2], M[2][2]));                       // depth units per metre along the light
+        float mpt = 2.0 * ShadowMapTexel / max(length(float3(M[0][0], M[1][0], M[2][0])), 1e-6);   // metres per shadow texel in this cascade
+        return lerp(1.0, CsmPcf(suv, ndc.z - bias, atlasTexel, DirShadowParams.w, zscale, mpt), saturate(DirShadowParams.x));
     }
     return 1.0;
 }
@@ -305,14 +386,14 @@ float Attenuation(float distance, float range)
 // four quadrants apart.
 float2 AtlasUV(float2 uv, int layer)
 {
-    const float pad = 1.0 / 128.0;
+    const float pad = 1.0 / 32.0;    // the atlas builder fills this gutter with the WRAPPED texture, so every mip up to the cap is seamless
     float2 q = float2((float)(layer & 1), (float)(layer >> 1));
     return (q + pad + frac(uv) * (1.0 - 2.0 * pad)) * 0.5;
 }
 
 void ClampGrad(inout float2 dx, inout float2 dy)
 {
-    const float maxG = 1.0 / 16.0;   // atlas UV per pixel: never coarser than 8 texels per quadrant on a 256² layer
+    const float maxG = 1.0 / 32.0;   // atlas UV per pixel: never a mip whose gutter is under half a texel (quadrants would bleed)
     float gl = max(length(dx), length(dy));
     if (gl > maxG) { float s = maxG / gl; dx *= s; dy *= s; }
 }
@@ -338,10 +419,33 @@ float MacroNoise(float2 p)
     float2 i = floor(p), f = frac(p); f = f * f * (3.0 - 2.0 * f);
     return lerp(lerp(MacroHash(i), MacroHash(i + float2(1, 0)), f.x), lerp(MacroHash(i + float2(0, 1)), MacroHash(i + float2(1, 1)), f.x), f.y);
 }
+// Sand ripples (procedural): crests across the north-east wind, 14 cm apart, bent by noise, in patches — a long gentle
+// stoss slope towards the wind and a short steep lee; their tilt joins the normal within 45 m of the camera.
+float2 SandRipples(float2 p, float camDist, float sandW)
+{
+    float fade = saturate(1.0 - camDist / 45.0) * sandW;
+    if (fade < 0.002) return float2(0.0, 0.0);
+    const float2 wind = float2(0.59, 0.81);
+    float warp = MacroNoise(p * 0.9) * 2.0 - 1.0;
+    float patches = saturate(MacroNoise(p * 0.07 + 3.1) * 1.6 - 0.3);
+    float phase = (dot(p, wind) + 0.08 * warp) / 0.14;
+    float aa = saturate(1.0 - fwidth(phase) * 1.5);   // no shimmer where a ripple is thinner than a pixel
+    float f = frac(phase);
+    float slope = f < 0.7 ? 0.35 : -0.82;
+    slope *= smoothstep(0.0, 0.06, abs(f - 0.7)) * smoothstep(0.0, 0.04, min(f, 1.0 - f));   // rounded crests and troughs
+    return -slope * 0.09 * patches * fade * aa * wind;
+}
+// The layer's mean colour: one texel of the quadrant two mips above the smallest.
+float3 LayerMean(int k)
+{
+    uint w, h, mips; AlbedoTexture.GetDimensions(0, w, h, mips);
+    return SRGBToLinear(AlbedoTexture.SampleLevel(LinearSampler, float2((float)(k & 1) + 0.5, (float)(k >> 1) + 0.5) * 0.5, max((float)mips - 2.0, 0.0)).rgb);
+}
+
 float MacroVariation(float2 worldXZ)
 {
     float n = 0.65 * MacroNoise(worldXZ * 0.025) + 0.35 * MacroNoise(worldXZ * 0.11 + 7.3);
-    return 0.91 + 0.18 * n;
+    return 0.86 + 0.28 * n;
 }
 
 // The sky as a reflection (IBL step 2): an equirect of the sky with mips at t11, EnvSky.w = 2 while bound, EnvHorizon.w =
@@ -363,6 +467,14 @@ float3 SampleEnv(float3 R, float roughness)
     return DecodeEnv(EnvMap.SampleLevel(LinearSampler, EnvUV(R), lod).rgb);
 }
 
+// a normal-atlas texel: tangent-space xyz; a two-channel (BC5) atlas carries x / y and z is rebuilt per sample
+float3 DecodeN(float3 s)
+{
+    s = s * 2.0 - 1.0;
+    if (HasNormalTexture == 2) s.z = sqrt(saturate(1.0 - dot(s.xy, s.xy)));
+    return s;
+}
+
 float4 PSMain(PS_IN input) : SV_TARGET
 {
     float3 Ng = normalize(input.norm);
@@ -381,7 +493,11 @@ float4 PSMain(PS_IN input) : SV_TARGET
     float3 nm = float3(0.0, 0.0, 0.0);
     float rough = 0.0;
     // detail: the layer's own normal map again at 7.3x finer tiling, fading out beyond ~28 m — close-up ripples and grain
-    float detailW = saturate(1.0 - length(CameraPosition - input.worldPos) / 28.0);
+    float camDist = length(CameraPosition - input.worldPos);
+    float detailW = saturate(1.0 - camDist / 70.0);
+    // far: beyond ~250 m a tile is below the pixel — blend to the layer's mean colour and a flat normal (the 2x2 mip holds
+    // exactly one texel per quadrant); the capped mip would otherwise shimmer with every camera move
+    float farW = saturate((camDist - 260.0) / 640.0);
     [unroll]
     for (int i = 0; i < 4; ++i)
     {
@@ -391,8 +507,28 @@ float4 PSMain(PS_IN input) : SV_TARGET
         float2 a = AtlasUV(uv, i);
         float2 dx = dpx * tilesPerMetre[i] * 0.5, dy = dpy * tilesPerMetre[i] * 0.5;
         ClampGrad(dx, dy);
-        albedo += wi * (HasAlbedoTexture != 0 ? SRGBToLinear(AlbedoTexture.SampleGrad(LinearSampler, a, dx, dy).rgb) : float3(0.5, 0.5, 0.5));
-        if (HasNormalTexture != 0) nm += wi * (NormalTexture.SampleGrad(LinearSampler, a, dx, dy).rgb * 2.0 - 1.0);
+        // the same layer at a 4.3x larger, offset tiling blended in half: the two periods never line up, so the 8 m repeat
+        // that an aerial view shows as a grid of blotches dissolves (two samples per map instead of one)
+        float2 aM = AtlasUV(uv * 0.23 + float2(0.21, 0.63), i);
+        float2 dxM = dx * 0.23, dyM = dy * 0.23;
+        ClampGrad(dxM, dyM);
+        // the sharp sample keeps every texel; the 4.3x larger tiling only MODULATES its tone (sampled soft, three mips down)
+        // and adds a little of its slope — averaging the two halved the grain's contrast and made the sand look blurred
+        if (HasAlbedoTexture != 0)
+        {
+            float3 sharp = SRGBToLinear(AlbedoTexture.SampleGrad(LinearSampler, a, dx, dy).rgb);
+            float3 broad = SRGBToLinear(AlbedoTexture.SampleGrad(LinearSampler, aM, dxM * 8.0, dyM * 8.0).rgb);
+            float lumB = dot(broad, float3(0.299, 0.587, 0.114));
+            float lumM = dot(LayerMean(i), float3(0.299, 0.587, 0.114));
+            albedo += wi * sharp * lerp(1.0, lumB / max(lumM, 0.02), 0.45);
+        }
+        else albedo += wi * float3(0.5, 0.5, 0.5);
+        if (HasNormalTexture != 0)
+        {
+            float3 ns = DecodeN(NormalTexture.SampleGrad(LinearSampler, a, dx, dy).rgb);
+            float3 nb = DecodeN(NormalTexture.SampleGrad(LinearSampler, aM, dxM, dyM).rgb);
+            nm += wi * (ns + float3(nb.xy * 0.35, 0.0));
+        }
         if (HasNormalTexture != 0 && detailW > 0.001)
         {
             float2 ad = AtlasUV(uv * 7.3 + 0.37, i);
@@ -403,6 +539,18 @@ float4 PSMain(PS_IN input) : SV_TARGET
         }
         if (HasRoughnessTexture != 0) rough += wi * RoughnessTexture.SampleGrad(LinearSampler, a, dx, dy).r;
     }
+    if (farW > 0.001 && HasAlbedoTexture != 0)
+    {
+        float aw, ah, amips;
+        AlbedoTexture.GetDimensions(0, aw, ah, amips);
+        float3 mean = float3(0.0, 0.0, 0.0);
+        [unroll]
+        for (int k = 0; k < 4; ++k)
+            if (w[k] > 0.002)
+                mean += w[k] * SRGBToLinear(AlbedoTexture.SampleLevel(LinearSampler, float2((float)(k & 1) + 0.5, (float)(k >> 1) + 0.5) * 0.5, max(amips - 2.0, 0.0)).rgb);
+        albedo = lerp(albedo, mean, farW);
+        nm *= 1.0 - farW;
+    }
     albedo *= input.tint.rgb;
     albedo *= MacroVariation(input.worldPos.xz);
     float roughness = max(HasRoughnessTexture != 0 ? rough : Roughness, 0.04);
@@ -411,9 +559,11 @@ float4 PSMain(PS_IN input) : SV_TARGET
 
     // normal mapping in the world-aligned frame of the tiled UVs: T follows +X (+u), B follows +Z (+v)
     float3 N = Ng;
+    if (HasNormalTexture == 2) nm.z = sqrt(saturate(1.0 - dot(nm.xy, nm.xy)));   // a two-channel (BC5) atlas: z from x / y
     if (HasNormalTexture != 0 && dot(nm, nm) > 1e-6)
     {
         if (UseDirectXNormals == 0) nm.y = -nm.y;
+        nm.xy += SandRipples(p, camDist, w.x + 0.5 * w.y);
         nm.xy *= NormalStrength;
         float3 T = normalize(float3(1.0, 0.0, 0.0) - Ng * Ng.x);
         float3 B = normalize(float3(0.0, 0.0, 1.0) - Ng * Ng.z);
@@ -532,16 +682,16 @@ float4 PSMain(PS_IN input) : SV_TARGET
         float aoW, aoH;
         SsaoTex.GetDimensions(aoW, aoH);
         float2 aoUV = input.pos.xy / float2(aoW * 2.0, aoH * 2.0);
-        ambient *= SsaoTex.Sample(ScreenSampler, aoUV).r;
+        float4 ss = SsaoTex.Sample(ScreenSampler, aoUV);
+        ambient *= ss.a;
+        // screen-space GI (#257 step 1): one bounce of the lit world (sqrt-encoded radiance, x4 range) onto this surface
+        if (GiStrength > 0.0) ambient += ss.rgb * ss.rgb * 4.0 * albedo * (1.0 - metallic) * ss.a;
     }
 
     float3 color = ambient + Lo;
     color = ApplyFog(color, input.worldPos);
 
-    float3 x = color * 0.5;
-    float3 a = x * (x + 0.0245786) - 0.000090537;
-    float3 b = x * (0.983729 * x + 0.4329510) + 0.238081;
-    color = saturate(a / b);
+    color = TonemapScene(color * (SceneExposure > 0.0 ? SceneExposure : 0.5), Tonemapper);   // the scene exposure, then the curve
     color = pow(max(color, 0.0), 1.0 / 2.2);
     return float4(color, 1.0);
 }

@@ -27,16 +27,19 @@ cbuffer PerFrame : register(b0)
     float FogHeightY;
     float FogHeightFalloff;
     uint FogMode;
-    float FogPadding;
+    float SceneExposure;   // pre-tonemap multiplier (0.5 = the classic look; <= 0 reads as 0.5)
     // Spot-light shadows (#23) — APPENDED after fog (@160), byte-matched to PerFrameConstants.
     // Per-spot shadow data lives in SpotLight (strength/bias/slot) + the ShadowVP[4] tail of the
     // light buffer; b0 only carries the atlas tile texel size (all tiles are the same size).
     float ShadowMapTexel;
-    uint3 ShadowPadding;
+    uint Tonemapper;       // 0 = ACES fit, 1 = PBR Neutral
+    float GiStrength;      // screen-space GI: > 0 = SsaoTex.rgb carries bounce light
+    uint ShadowPadding1;
     // SSAO (#32) — APPENDED @176, byte-matched to PerFrameConstants. Screen UV is derived from
     // SV_POSITION and the AO texture's own dimensions, so no screen size travels here.
     float SsaoEnabled;
-    float3 SsaoPadding;
+    float2 SsaoPadding;
+    float FogSunGlow;      // aerial perspective: the sun's glow in the fog (0 = off)
     // Sky gradient for specular reflections — APPENDED @192, byte-matched to PerFrameConstants.
     float4 EnvSky;       // rgb zenith, w = 1 when a gradient sky is active
     float4 EnvHorizon;
@@ -62,12 +65,53 @@ float FogOpticalDepth(float density, float heightY, float k, float3 cam, float3 
     return density * (below + above * meanDensity);
 }
 
+// The scene's tonemapper (Tonemapper in the frame constants): 0 = the ACES fit — the classic look, which pulls bright
+// saturated colours towards white; 1 = Khronos PBR Neutral — hue-preserving with a gentle highlight desaturation, so a
+// sunlit desert stays orange and a red car stays red. The input is the EXPOSED scene colour (scene exposure applied).
+float3 TonemapNeutral(float3 color)
+{
+    const float startCompression = 0.8 - 0.04;
+    const float desaturation = 0.15;
+    float x = min(color.r, min(color.g, color.b));
+    float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+    color -= offset;
+    float peak = max(color.r, max(color.g, color.b));
+    if (peak < startCompression) return color;
+    const float d = 1.0 - startCompression;
+    float newPeak = 1.0 - d * d / (peak + d - startCompression);
+    color *= newPeak / peak;
+    float g = 1.0 - 1.0 / (desaturation * (peak - newPeak) + 1.0);
+    return lerp(color, newPeak * float3(1.0, 1.0, 1.0), g);
+}
+float3 TonemapScene(float3 x, uint mode)
+{
+    if (mode == 1) return saturate(TonemapNeutral(max(x, 0.0)));
+    float3 a = x * (x + 0.0245786) - 0.000090537;
+    float3 b = x * (0.983729 * x + 0.4329510) + 0.238081;
+    return saturate(a / b);
+}
+
+// Aerial perspective: what the fog scatters towards the eye. The flat FogColor, plus the sun's forward-scatter glow when
+// looking towards it (FogSunGlow 0 = off) — the haze brightens and warms around the sun like real air does.
+float3 FogInscatter(float3 worldPos)
+{
+    float3 c = FogColor;
+    if (FogSunGlow > 0.0 && DirectionalIntensity > 0.001)
+    {
+        float3 V = normalize(worldPos - CameraPosition);
+        float mu = saturate(dot(V, normalize(-LightDirection)));
+        float phase = 0.12 * mu * mu + 0.88 * pow(mu, 10.0);
+        c += LightColor * (FogSunGlow * phase);
+    }
+    return c;
+}
+
 float3 ApplyFog(float3 color, float3 worldPos)
 {
     if (FogDensity <= 0.0) return color;
     float optical = FogOpticalDepth(FogDensity, FogHeightY, FogHeightFalloff, CameraPosition, worldPos);
     float f = 1.0 - exp2(-optical);
-    return lerp(color, FogColor, saturate(f));
+    return lerp(color, FogInscatter(worldPos), saturate(f));
 }
 
 cbuffer PerObject : register(b1)
@@ -180,6 +224,45 @@ float SampleSpotShadow(float3 worldPos, int slot, float strength, float bias)
 // Directional cascade shadow (#24): try cascades near -> far and take the FIRST whose ortho crop
 // contains the point (tight snapped crops make projection-inside more robust than distance-select at
 // the boundaries). 3x3 hardware-PCF kernel; per-cascade bias grows with the coarser world-per-texel.
+// The sun's shadow filter (Light ▸ Soft): softness <= 1 = the classic 3x3 box; above it a 16-tap Poisson disk of that
+// radius in shadow texels — palm shadows on sand get a real penumbra instead of a stair-stepped edge.
+static const float2 PoissonDisk16[16] = { float2(-0.94201624,-0.39906216), float2(0.94558609,-0.76890725), float2(-0.094184101,-0.92938870), float2(0.34495938,0.29387760), float2(-0.91588581,0.45771432), float2(-0.81544232,-0.87912464), float2(-0.38277543,0.27676845), float2(0.97484398,0.75648379), float2(0.44323325,-0.97511554), float2(0.53742981,-0.47373420), float2(-0.26496911,-0.41893023), float2(0.79197514,0.19090188), float2(-0.24188840,0.99706507), float2(-0.81409955,0.91437590), float2(0.19984126,0.78641367), float2(0.14383161,-0.14100790) };
+float CsmPcf(float2 suv, float depth, float atlasTexel, float softness, float zscale, float mpt)
+{
+    float lit = 0.0;
+    if (softness <= 1.01)
+    {
+        [unroll]
+        for (int y = -1; y <= 1; ++y)
+            [unroll]
+            for (int x = -1; x <= 1; ++x)
+                lit += CsmShadowMap.SampleCmpLevelZero(ShadowSampler, suv + float2((float)x, (float)y) * atlasTexel, depth);
+        return lit / 9.0;
+    }
+    // contact hardening (PCSS without a depth read): comparison taps at the receiver's depth minus 0 / 1 / 3 / 9 m over the
+    // widest penumbra tell how far behind the receiver the blockers sit; the Poisson radius grows with that distance — a
+    // trunk's shadow is sharp at its foot and soft where the crown throws it 10 m up. Softness caps the radius (texels).
+    const float tan_a = 0.035;   // the sun's angular radius, widened to 2 degrees as the big engines do
+    float rs = clamp(12.0 * tan_a / mpt, 1.0, softness) * atlasTexel;
+    float sh[4];
+    [unroll]
+    for (int l = 0; l < 4; ++l)
+    {
+        float k = (l == 0) ? 0.0 : (l == 1 ? 1.0 : (l == 2 ? 3.0 : 9.0));
+        float s = 0.0;
+        [unroll]
+        for (int i = 0; i < 4; ++i) s += CsmShadowMap.SampleCmpLevelZero(ShadowSampler, suv + PoissonDisk16[i * 4 + l] * rs, depth - k * zscale);
+        sh[l] = 1.0 - s * 0.25;
+    }
+    if (sh[0] < 0.02) return 1.0;   // nothing in the way anywhere in the search disk
+    float bd = (0.5 * (sh[0] + sh[1]) + (sh[1] + sh[2]) + 3.0 * (sh[2] + sh[3])) / max(sh[0], 0.05);   // the mean blocker distance (m)
+    float r = clamp(bd * tan_a / mpt, 1.0, softness) * atlasTexel;
+    [unroll]
+    for (int i = 0; i < 16; ++i)
+        lit += CsmShadowMap.SampleCmpLevelZero(ShadowSampler, suv + PoissonDisk16[i] * r, depth);
+    return lit / 16.0;
+}
+
 float SampleCascadeShadow(float3 worldPos)
 {
     int count = (int)DirShadowParams.z;
@@ -199,19 +282,16 @@ float SampleCascadeShadow(float3 worldPos)
             continue;
 
         // Map into tile c of the 2x2 atlas; keep the whole 3x3 kernel inside the tile.
-        suv = clamp(suv, ShadowMapTexel * 1.5, 1.0 - ShadowMapTexel * 1.5) * 0.5;
+        float guard = ShadowMapTexel * (max(DirShadowParams.w, 1.0) + 0.5);   // the whole filter stays inside the tile
+        suv = clamp(suv, guard, 1.0 - guard) * 0.5;
         suv += float2((c & 1) != 0 ? 0.5 : 0.0, (c & 2) != 0 ? 0.5 : 0.0);
 
-        float bias = DirShadowParams.y * (1.0 + (float)c);   // coarser cascade -> more world per texel
+        float bias = DirShadowParams.y * (1.0 + (float)c) * (0.75 + 0.25 * max(DirShadowParams.w, 1.0));   // a wider filter needs more bias on slopes   // coarser cascade -> more world per texel
         float atlasTexel = ShadowMapTexel * 0.5;             // tile texel -> atlas UV
-        float lit = 0.0;
-        [unroll]
-        for (int y = -1; y <= 1; ++y)
-            [unroll]
-            for (int x = -1; x <= 1; ++x)
-                lit += CsmShadowMap.SampleCmpLevelZero(ShadowSampler,
-                    suv + float2((float)x, (float)y) * atlasTexel, ndc.z - bias);
-        return lerp(1.0, lit / 9.0, saturate(DirShadowParams.x));
+        float4x4 M = CascadeVP[c];
+        float zscale = length(float3(M[0][2], M[1][2], M[2][2]));                       // depth units per metre along the light
+        float mpt = 2.0 * ShadowMapTexel / max(length(float3(M[0][0], M[1][0], M[2][0])), 1e-6);   // metres per shadow texel in this cascade
+        return lerp(1.0, CsmPcf(suv, ndc.z - bias, atlasTexel, DirShadowParams.w, zscale, mpt), saturate(DirShadowParams.x));
     }
     return 1.0;   // beyond every cascade -> lit
 }
@@ -496,6 +576,7 @@ float4 PSMain(PS_IN input, bool isFront : SV_IsFrontFace) : SV_TARGET
     if (HasNormalTexture != 0) {
         float3 normalMap = NormalTexture.Sample(LinearSampler, uv).rgb;
         normalMap = normalMap * 2.0 - 1.0;
+        if (HasNormalTexture == 2) normalMap.z = sqrt(saturate(1.0 - dot(normalMap.xy, normalMap.xy)));   // a two-channel (BC5) map
         if (UseDirectXNormals == 0) normalMap.y = -normalMap.y;
         normalMap.xy *= NormalStrength;
         float3x3 TBN = float3x3(T, B, N);
@@ -531,7 +612,7 @@ float4 PSMain(PS_IN input, bool isFront : SV_IsFrontFace) : SV_TARGET
 
         // leaves: the diffuse term wraps round the thin blade and the sun shines through it (translucency)
         float NdotLw = saturate((dot(N, L) + 0.4) / 1.4);
-        float3 trans = albedo * radiance * pow(saturate(dot(V, -L)), 3.0) * 0.35 * (1.0 - metallic);
+        float3 trans = albedo * radiance * (0.45 * saturate(-dot(N, L)) + 0.6 * pow(saturate(dot(V, -L)), 2.0)) * (1.0 - metallic);   // a leaf lit from behind glows (diffuse transmission) and a forward lobe towards the sun
         Lo += (kD * albedo / PI) * radiance * NdotLw + spec * radiance * NdotL + trans / PI;
     }
 
@@ -652,7 +733,10 @@ float4 PSMain(PS_IN input, bool isFront : SV_IsFrontFace) : SV_TARGET
         float aoW, aoH;
         SsaoTex.GetDimensions(aoW, aoH);
         float2 aoUV = input.pos.xy / float2(aoW * 2.0, aoH * 2.0);
-        ambient *= SsaoTex.Sample(ScreenSampler, aoUV).r;
+        float4 ss = SsaoTex.Sample(ScreenSampler, aoUV);
+        ambient *= ss.a;
+        // screen-space GI (#257 step 1): one bounce of the lit world (sqrt-encoded radiance, x4 range) onto this surface
+        if (GiStrength > 0.0) ambient += ss.rgb * ss.rgb * 4.0 * albedo * (1.0 - metallic) * ss.a;
     }
 
     float3 color = ambient + Lo;
@@ -662,10 +746,7 @@ float4 PSMain(PS_IN input, bool isFront : SV_IsFrontFace) : SV_TARGET
     color = ApplyFog(color, input.worldPos);
 
     // ACES Filmic Tone Mapping (RRT+ODT fit)
-    float3 x = color * 0.5;
-    float3 a = x * (x + 0.0245786) - 0.000090537;
-    float3 b = x * (0.983729 * x + 0.4329510) + 0.238081;
-    color = saturate(a / b);
+    color = TonemapScene(color * (SceneExposure > 0.0 ? SceneExposure : 0.5), Tonemapper);   // the scene exposure, then the curve
 
     // Gamma Correction (sRGB)
     color = pow(max(color, 0.0), 1.0 / 2.2);

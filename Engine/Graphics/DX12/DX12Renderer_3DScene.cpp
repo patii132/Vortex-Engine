@@ -55,6 +55,7 @@ namespace vortex::graphics::dx12
 
 	void DX12Renderer::render_3d_scene()
 	{
+		m_scene_color_srv = {}; m_scene_depth_srv = {};   // the transparent pass copies them below (#200)
 		auto rtv = m_active_rtv;
 		auto dsv = m_active_dsv;
 		m_command_list->OMSetRenderTargets(1, &rtv, FALSE, &dsv);
@@ -462,7 +463,7 @@ namespace vortex::graphics::dx12
 			auto* tex = mat->albedo_texture();
 			if (tex && tex->is_valid() && tex->srv_gpu().ptr != 0) { obj.has_albedo_texture = 1; m_command_list->SetGraphicsRootDescriptorTable(3, tex->srv_gpu()); }
 			auto* normal = mat->normal_texture();
-			if (normal && normal->is_valid() && normal->srv_gpu().ptr != 0) { obj.has_normal_texture = 1; m_command_list->SetGraphicsRootDescriptorTable(4, normal->srv_gpu()); }
+			if (normal && normal->is_valid() && normal->srv_gpu().ptr != 0) { obj.has_normal_texture = normal->format() == TextureFormat::BC5_UNORM ? 2u : 1u; m_command_list->SetGraphicsRootDescriptorTable(4, normal->srv_gpu()); }
 			auto* metallic_tex = mat->metallic_texture();
 			if (metallic_tex && metallic_tex->is_valid() && metallic_tex->srv_gpu().ptr != 0) { obj.has_metallic_texture = props.has_metallic_texture ? props.has_metallic_texture : 1; m_command_list->SetGraphicsRootDescriptorTable(5, metallic_tex->srv_gpu()); }
 			auto* roughness_tex = mat->roughness_texture();
@@ -607,6 +608,17 @@ namespace vortex::graphics::dx12
 		// each item's view depth comes from the world translation at bytes 48..59 of its 64B matrix.
 		// Blend order matters, so items draw ONE BY ONE with depth write off — correct layering beats
 		// instancing here, and horror scenes hold dozens of transparents, not thousands (capped anyway).
+		// Water refraction / screen-space reflections (#200): the transparents read a copy of the opaque colour + depth so far;
+		// the screen-space GI (#257 step 1) reads the colour copy NEXT frame, so it is made every frame while GI is on.
+		if (world && m_active_color && m_active_depth && (!transparentRuns.empty() || m_gi_enabled))
+		{
+			m_scene_color_srv = m_particles.scene_color_srv(m_command_list.Get(), m_active_color);
+			m_scene_depth_srv = m_particles.scene_depth_srv(m_command_list.Get(), m_active_depth);
+			// the GI pass reprojects into this copy next frame (it checks the size against its own view, so a preview's copy
+			// of another size is never mistaken for the main view's)
+			m_gi_prev_copy = m_particles.last_scene_color(); m_gi_prev_w = m_active_width; m_gi_prev_h = m_active_height;
+			if (!transparentRuns.empty()) bind_scene_pass(m_per_frame_cb->GetGPUVirtualAddress());
+		}
 		if (!transparentRuns.empty() && m_instance_vb_mapped)
 		{
 			struct TDraw { u32 run; u32 slot; float d2; };
@@ -720,6 +732,15 @@ namespace vortex::graphics::dx12
 		if (m_ssao_current_srv.ptr != 0)
 			m_command_list->SetGraphicsRootDescriptorTable(13, m_ssao_current_srv); // t10 (#32)
 		{ auto env = env_map_srv(); if (env.ptr != 0) m_command_list->SetGraphicsRootDescriptorTable(14, env); } // t11 (IBL step 2)
+		{
+			// t12 / t13 (#200): the opaque colour + depth copies once the transparent pass made them, the white texture before
+			auto& rg = ResourceRegistry::instance(); Texture* white = rg.get_texture(rg.default_white_texture());
+			const D3D12_GPU_DESCRIPTOR_HANDLE fallback = (white && white->is_valid()) ? white->srv_gpu() : D3D12_GPU_DESCRIPTOR_HANDLE{};
+			const D3D12_GPU_DESCRIPTOR_HANDLE sc = m_scene_color_srv.ptr ? m_scene_color_srv : fallback;
+			const D3D12_GPU_DESCRIPTOR_HANDLE sd = m_scene_depth_srv.ptr ? m_scene_depth_srv : fallback;
+			if (sc.ptr != 0) m_command_list->SetGraphicsRootDescriptorTable(15, sc);
+			if (sd.ptr != 0) m_command_list->SetGraphicsRootDescriptorTable(16, sd);
+		}
 	}
 
 	DX12Particles::View DX12Renderer::particle_view(const DirectX::XMFLOAT4X4& view_projection, const DirectX::XMFLOAT4X4& viewmodel_projection,
@@ -748,6 +769,7 @@ namespace vortex::graphics::dx12
 		DX12Particles::Environment e{};
 		e.fog_color = f.fog_color; e.fog_density = f.fog_density;
 		e.fog_height_y = f.fog_height_y; e.fog_height_falloff = f.fog_height_falloff;
+		e.scene_exposure = f.scene_exposure > 0.0f ? f.scene_exposure : 0.5f; e.fog_sun_glow = f.fog_sun_glow; e.tonemapper = f.tonemapper;
 		e.sun_direction = f.light_direction; e.sun_intensity = f.directional_intensity;
 		e.sun_color = f.light_color; e.ambient = f.ambient_strength;
 		e.point_lights = (std::min)(f.point_light_count, (u32)MAX_POINT_LIGHTS);

@@ -27,22 +27,32 @@ namespace VortexEditor.Panels
         private static Scene ActiveScene => ProjectData.Current?.ActiveScene;
         private static SceneSettings Settings => ActiveScene?.Settings;
 
-        // ---- "Preview post effects in viewport" (editor-only, never saved) — shared with the viewport's view options
-        private static bool _previewFx;
-        private static event Action PreviewChanged;
+        // ---- "Post effects in viewport": the scene's grade, bloom, FXAA, vignette, grain and aberration in the editor's own
+        // viewport, while building AND while playing in it (one switch, kept as an editor preference, on by default so the
+        // viewport shows what the game shows; off for a faster frame). The standalone player and the game window always apply
+        // them (PlayerHost). Shared by the viewport toolbar's FX button, the view-options menu and this panel's switch.
+        private static bool _previewFx = EditorPreferences.Current.PostEffectsInViewport;
+        internal static event Action PreviewChanged;
         public static bool PreviewPostEffects => _previewFx;
         public static void SetPreviewPostEffects(bool on)
         {
             _previewFx = on;
-            try { VortexAPI.SetPostMainView(on); } catch { }
+            ApplyPreviewPostEffects();
+            try { var p = EditorPreferences.Current; if (p.PostEffectsInViewport != on) { p.PostEffectsInViewport = on; p.Save(); } } catch { }
             PreviewChanged?.Invoke();
+        }
+        /// <summary>Push the preference into the renderer (at start-up and whenever a project opens: the engine comes up with
+        /// the flag off, as the player's clean default).</summary>
+        public static void ApplyPreviewPostEffects()
+        {
+            try { VortexAPI.SetPostMainView(_previewFx); } catch { }
         }
 
         public EnvironmentPanel()
         {
             InitializeComponent();
             Build();
-            EditorSession.Instance.ProjectOpened += _ => Dispatcher.UIThread.Post(Refresh);
+            EditorSession.Instance.ProjectOpened += _ => Dispatcher.UIThread.Post(() => { ApplyPreviewPostEffects(); Refresh(); });
             EditorSession.Instance.ProjectClosed += () => Dispatcher.UIThread.Post(Refresh);
             AttachedToVisualTree += (s, e) => Refresh();
             PreviewChanged += () => Dispatcher.UIThread.Post(() => { _loading = true; PreviewFx.IsChecked = _previewFx; _loading = false; });
@@ -50,10 +60,21 @@ namespace VortexEditor.Panels
 
         private void Build()
         {
+            Sections.Children.Add(Section("Exposure", "The camera's aperture: scene exposure in stops BEFORE the tonemapper. +1 doubles the light the ACES curve receives — brightens a sunlit world without the clipping of the grading exposure. 0 = the classic look.", null, null,
+                Slider("Stops", "−3 … +4 stops; a sunlit desert wants +1.5 … +2.5, a night scene −1", -3, 4, s => s.SceneExposure, (s, v) => s.SceneExposure = v),
+                Choice("Tonemapper", "ACES: the classic filmic curve — bright saturated colours drift towards white. PBR Neutral (Khronos): keeps hue and saturation, a sunlit desert stays orange.", new[] { "ACES", "PBR Neutral" }, s => s.Tonemapper, (s, v) => s.Tonemapper = v)));
+            Sections.Children.Add(Section("Anti-aliasing", "FXAA on the final picture: smooth edges on fronds, grass and ripples (nine taps, no history, ~0.3 ms). Temporal AA comes with the AAA rendering milestone.", s => s.AntiAliasEnabled, (s, v) => s.AntiAliasEnabled = v));
+            Sections.Children.Add(Section("Global Illumination", "Dynamic GI, step 1 (screen space): one bounce of the lit world traced against the depth with the previous frame's light — sunlit sand warms the palm trunks, a lit wall lights the floor beside it. Needs SSAO on; ~0.4 ms at half resolution. The world-space probe cache and ray tracing follow.", s => s.GiEnabled, (s, v) => s.GiEnabled = v,
+                Slider("Strength", "1 = a physical diffuse bounce", 0, 3, s => s.GiStrength, (s, v) => s.GiStrength = v),
+                Slider("Radius (m)", "How far a bounce ray travels", 0.5, 10, s => s.GiRadius, (s, v) => s.GiRadius = v)));
+            Sections.Children.Add(Section("Ground Bounce", "The sun's light bounced off the ground into the shadows: a warm lower hemisphere added to the sky light, scaled by the sun's strength and height. 0 = off; a desert noon wants 0.4–0.7.", null, null,
+                Slider("Strength", null, 0, 1.5, s => s.BounceStrength, (s, v) => s.BounceStrength = v),
+                ColorRow("Ground", s => (s.BounceR, s.BounceG, s.BounceB), (s, c) => { s.BounceR = c.r; s.BounceG = c.g; s.BounceB = c.b; })));
             Sections.Children.Add(Section("Fog", "Height fog: distance haze plus an optional ground mist below Height Y.", s => s.FogEnabled, (s, v) => s.FogEnabled = v,
                 Slider("Density", null, 0, 0.5, s => s.FogDensity, (s, v) => s.FogDensity = v),
                 Slider("Height Y", null, -20, 20, s => s.FogHeightY, (s, v) => s.FogHeightY = v),
                 Slider("Ground Mist", "0 = uniform distance fog; higher = mist hugging the ground below Height Y", 0, 2, s => s.FogHeightFalloff, (s, v) => s.FogHeightFalloff = v),
+                Slider("Sun Glow", "Aerial perspective: the sun's glow scattered in the haze when looking towards it (0 = off, 0.3–0.6 a desert noon, 1–2 a low sun)", 0, 3, s => s.FogSunGlow, (s, v) => s.FogSunGlow = v),
                 ColorRow("Color", s => (s.FogR, s.FogG, s.FogB), (s, c) => { s.FogR = c.r; s.FogG = c.g; s.FogB = c.b; })));
             Sections.Children.Add(Section("Volumetric Fog", "Ray-marched fog (#119): light scattered towards the camera from the fog colour, the sun and every point / spot light — visible cones and shafts. Uses the Fog height and colour above; works with Fog off.", s => s.VolumetricEnabled, (s, v) => s.VolumetricEnabled = v,
                 Slider("Density", "Scattering per metre — 0.01 a haze, 0.03 fog, 0.1 a thick cellar", 0, 0.25, s => s.VolumetricDensity, (s, v) => s.VolumetricDensity = v),
@@ -102,8 +123,8 @@ namespace VortexEditor.Panels
             var body = new StackPanel { Spacing = 2 };
             var sw = new ToggleSwitch { HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right, OnContent = "", OffContent = "" };
             DockPanel.SetDock(sw, Dock.Right);
-            sw.IsCheckedChanged += (s, e) => { if (_loading) return; var st = Settings; if (st == null) return; set(st, sw.IsChecked == true); body.Opacity = sw.IsChecked == true ? 1 : 0.55; Apply(); };
-            header.Children.Add(sw);
+            sw.IsCheckedChanged += (s, e) => { if (_loading || set == null) return; var st = Settings; if (st == null) return; set(st, sw.IsChecked == true); body.Opacity = sw.IsChecked == true ? 1 : 0.55; Apply(); };
+            if (set != null) header.Children.Add(sw);   // a section without a switch (always on)
             var t = new TextBlock { Text = title, FontWeight = FontWeight.SemiBold, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
             if (tip != null) ToolTip.SetTip(t, tip);
             header.Children.Add(t);
@@ -111,7 +132,7 @@ namespace VortexEditor.Panels
             foreach (var r in rows) body.Children.Add(r);
             stack.Children.Add(body);
             card.Child = stack;
-            _refreshers.Add(() => { var st = Settings; if (st == null) return; sw.IsChecked = get(st); body.Opacity = get(st) ? 1 : 0.55; });
+            _refreshers.Add(() => { var st = Settings; if (st == null || get == null) return; sw.IsChecked = get(st); body.Opacity = get(st) ? 1 : 0.55; });
             return card;
         }
 
@@ -136,6 +157,21 @@ namespace VortexEditor.Panels
             }
             row.Children.Add(slider); row.Children.Add(box);
             _refreshers.Add(() => { var st = Settings; if (st == null) return; slider.Value = Math.Max(min, Math.Min(max, get(st))); box.Text = Fmt(get(st)); });
+            return row;
+        }
+
+        private Control Choice(string label, string tip, string[] names, Func<SceneSettings, int> get, Action<SceneSettings, int> set)
+        {
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("92,*"), Classes = { "proprow" } };
+            var lbl = new TextBlock { Text = label, Classes = { "label", "small" } };
+            if (tip != null) ToolTip.SetTip(lbl, tip);
+            row.Children.Add(lbl);
+            var combo = new ComboBox { ItemsSource = names, MinHeight = 24, FontSize = 11, Margin = new Thickness(4, 0), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch };
+            if (tip != null) ToolTip.SetTip(combo, tip);
+            Grid.SetColumn(combo, 1);
+            combo.SelectionChanged += (s, e) => { if (_loading) return; var st = Settings; if (st == null || combo.SelectedIndex < 0) return; set(st, combo.SelectedIndex); Apply(); };
+            row.Children.Add(combo);
+            _refreshers.Add(() => { var st = Settings; if (st == null) return; int i = get(st); combo.SelectedIndex = i < 0 || i >= names.Length ? 0 : i; });
             return row;
         }
 

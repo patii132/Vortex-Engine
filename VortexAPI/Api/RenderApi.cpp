@@ -652,6 +652,13 @@ EDITOR_INTERFACE void SetPostFxChromaticAberration(bool enabled, float strength,
 
 // Color grading (#31): exposure (EV stops), contrast, saturation, temperature (-1 cool..+1 warm),
 // tint (-1 green..+1 magenta). Single pass, folded into the post uber-pass.
+// Anti-aliasing: FXAA 3.11 (console variant) in the post pass on the LDR picture — nine taps, no history, the cheap
+// edge smoothing until temporal AA (#141). Persistent renderer state like the other post effects.
+EDITOR_INTERFACE void SetPostFxAntiAlias(bool enabled)
+{
+	graphics::Renderer::instance().postfx().params().fxaa = enabled;
+}
+
 EDITOR_INTERFACE void SetPostFxColorGrade(bool enabled, float exposure, float contrast, float saturation,
 	float temperature, float tint)
 {
@@ -686,6 +693,20 @@ EDITOR_INTERFACE void SetSSAO(bool enabled, float radius, float intensity)
 {
 	auto& r = graphics::Renderer::instance();
 	r.set_ssao(enabled, radius, intensity);
+}
+
+// Screen-space global illumination (#257 step 1): one bounce of the lit world traced in the SSAO pass (needs SSAO on).
+// strength scales the bounce (1 = physical for a diffuse bounce), radius = the trace length in metres.
+EDITOR_INTERFACE void SetGlobalIllumination(bool enabled, float strength, float radius)
+{
+	graphics::Renderer::instance().set_gi(enabled, strength, radius);
+}
+
+// #257 step 2: the bounce from the sun's shadow map — the ground's albedo the sunlit emitters carry (the scene's bounce
+// colour), and whether that reflective-shadow-map gather runs at all.
+EDITOR_INTERFACE void SetGlobalIlluminationBounce(float r, float g, float b, bool shadow_map_bounce)
+{
+	graphics::Renderer::instance().set_gi_ground_albedo(r, g, b, shadow_map_bounce);
 }
 
 // Main-view gate: post-FX in the PRIMARY swapchain. The GameHost player enables it at boot (there the

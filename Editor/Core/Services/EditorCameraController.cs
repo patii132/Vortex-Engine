@@ -50,8 +50,20 @@ namespace Editor.Core.Services
             UpdateCamera();
         }
 
+        /// <summary>Home: back to the view the active scene was saved from (<see cref="EditorViewState"/>), or the classic
+        /// start pose for a scene without one.</summary>
         public void Reset()
         {
+            try
+            {
+                var scene = Editor.Core.Data.ProjectData.Current?.ActiveScene;
+                if (scene != null && scene.Settings != null && scene.Settings.EditorViewSet)
+                {
+                    SetPositionAndRotation(scene.Settings.EditorViewX, scene.Settings.EditorViewY, scene.Settings.EditorViewZ, scene.Settings.EditorViewYaw, scene.Settings.EditorViewPitch);
+                    return;
+                }
+            }
+            catch { }
             _posX = 0; _posY = 2; _posZ = -5;
             _yaw = 0; _pitch = 0; _roll = 0;
             UpdateCamera();

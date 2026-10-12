@@ -477,7 +477,7 @@ namespace vortex::graphics::sdlgpu
 	{
 		m_vs_standard = create_shader("standard", "VSMain", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 1);
 		m_vs_skinned = create_shader("standard", "VSSkinned", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 2);
-		m_fs_standard = create_shader("standard", "PSMain", SDL_GPU_SHADERSTAGE_FRAGMENT, 11, 0, 3);
+		m_fs_standard = create_shader("standard", "PSMain", SDL_GPU_SHADERSTAGE_FRAGMENT, 13, 0, 3);
 		m_vs_grid = create_shader("grid", "GridVS", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 1);
 		m_fs_grid = create_shader("grid", "GridPS", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 1);
 		m_vs_sky = create_shader("skybox", "SkyVS", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 1);
@@ -766,6 +766,9 @@ namespace vortex::graphics::sdlgpu
 		if (m_x11_lib) { SDL_UnloadObject(m_x11_lib); m_x11_lib = nullptr; }
 		m_x11_select_input = m_x11_flush = m_xi2_select_events = nullptr;
 		if (m_shadow_dummy) { SDL_ReleaseGPUTexture(m_device, m_shadow_dummy); m_shadow_dummy = nullptr; }
+		if (m_scene_color_copy) { SDL_ReleaseGPUTexture(m_device, m_scene_color_copy); m_scene_color_copy = nullptr; }
+		if (m_scene_depth_copy) { SDL_ReleaseGPUTexture(m_device, m_scene_depth_copy); m_scene_depth_copy = nullptr; }
+		m_scene_copy_valid = false;
 		if (m_sampler_shadow) { SDL_ReleaseGPUSampler(m_device, m_sampler_shadow); m_sampler_shadow = nullptr; }
 		m_shader_blobs.clear();
 		m_initialized = false;
@@ -848,7 +851,7 @@ namespace vortex::graphics::sdlgpu
 			const auto& p = m_postfx.params();
 			cb.texel[0] = 1.0f / (float)w; cb.texel[1] = 1.0f / (float)h;
 			cb.time = elapsed_seconds();
-			cb.flags = (p.vignette ? 1u : 0u) | (p.grain ? 2u : 0u) | (p.ca ? 4u : 0u) | (p.debug_invert ? 8u : 0u) | (p.grade ? 16u : 0u);
+			cb.flags = (p.vignette ? 1u : 0u) | (p.grain ? 2u : 0u) | (p.ca ? 4u : 0u) | (p.debug_invert ? 8u : 0u) | (p.grade ? 16u : 0u) | (p.fxaa ? 64u : 0u);
 			cb.vignette[0] = p.vig_intensity; cb.vignette[1] = p.vig_smoothness; cb.vignette[2] = p.vig_roundness;
 			cb.vignette_color[0] = p.vig_r; cb.vignette_color[1] = p.vig_g; cb.vignette_color[2] = p.vig_b;
 			cb.grain_ca[0] = p.grain_intensity; cb.grain_ca[1] = p.grain_size; cb.grain_ca[2] = p.ca_strength; cb.grain_ca[3] = p.ca_falloff;
@@ -1114,7 +1117,7 @@ namespace vortex::graphics::sdlgpu
 		{
 			// two vertex uniform buffers: PerFrame (0) and PerObject (1) — custom vertex shaders may read the material (#125)
 			SDL_GPUShader* vs = skinned ? m_vs_skinned : create_shader_from_code(vs_code, "VSMain", path, SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 2);
-			SDL_GPUShader* fs = create_shader_from_code(fs_code, "PSMain", path, SDL_GPU_SHADERSTAGE_FRAGMENT, 11, 0, 3);
+			SDL_GPUShader* fs = create_shader_from_code(fs_code, "PSMain", path, SDL_GPU_SHADERSTAGE_FRAGMENT, 13, 0, 3);
 			if (vs && fs)
 			{
 				wait_idle();
@@ -1231,7 +1234,7 @@ namespace vortex::graphics::sdlgpu
 		std::string vs_text = cap.text;
 		cap.text.clear();
 		SDL_ClearError();
-		SDL_GPUShader* fs = create_shader_from_code(fs_code, "PSMain", path, SDL_GPU_SHADERSTAGE_FRAGMENT, 11, 0, 3);
+		SDL_GPUShader* fs = create_shader_from_code(fs_code, "PSMain", path, SDL_GPU_SHADERSTAGE_FRAGMENT, 13, 0, 3);
 		// Metal compiles the whole source for each stage: report the same diagnostics once
 		if (!fs) errors += (!vs && cap.text == vs_text) ? std::string("PSMain: the same errors\n") : "PSMain: " + stage_error(cap) + "\n";
 		cap.text.clear();

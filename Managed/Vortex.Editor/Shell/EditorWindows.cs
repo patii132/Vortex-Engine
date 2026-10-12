@@ -42,6 +42,7 @@ namespace VortexEditor.Shell
         public static void CollisionEditor(GameEntity e) => CollisionEditorWindow.Open(e);
         public static void AudioMixer() => AudioMixerWindow.Open();
         public static void Git() => GitWindow.Open();
+        public static void TerrainTools() => TerrainToolsWindow.Open();
         public static void History() => HistoryWindow.Open();
         public static void StressTest(string modelFullPath) => StressTestWindow.Open(modelFullPath);
         public static void AssetTags(string fullPath) => AssetTagEditorDialog.Open(fullPath);

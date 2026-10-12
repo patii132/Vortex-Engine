@@ -86,6 +86,7 @@ namespace vortex::graphics::sdlgpu
 			bool ca{ false };
 			float ca_strength{ 0.35f }, ca_falloff{ 1.2f };
 			bool grade{ false };
+			bool fxaa{ false };   // FXAA on the LDR picture
 			float exposure{ 0.0f }, contrast{ 1.0f }, saturation{ 1.0f }, temperature{ 0.0f }, tint{ 0.0f };
 			bool bloom{ false };
 			float bloom_threshold{ 0.75f }, bloom_knee{ 0.5f }, bloom_intensity{ 0.7f }, bloom_scatter{ 0.65f };
@@ -94,7 +95,7 @@ namespace vortex::graphics::sdlgpu
 		Params& params() { return m_params; }
 		const Params& params() const { return m_params; }
 		bool bloom_requested() const { return m_params.bloom; }
-		bool active() const { return m_params.vignette || m_params.grain || m_params.ca || m_params.grade || m_params.debug_invert || m_params.bloom; }
+		bool active() const { return m_params.vignette || m_params.grain || m_params.ca || m_params.grade || m_params.fxaa || m_params.debug_invert || m_params.bloom; }
 		void set_main_view_enabled(bool enabled) { m_main_view = enabled; }
 		bool main_view_enabled() const { return m_main_view; }
 	private:
@@ -192,6 +193,10 @@ namespace vortex::graphics::sdlgpu
 		};
 
 		void clear_lights();
+		// Screen-space GI (#257 step 1): one bounce traced in the SSAO pass (needs SSAO on); strength scales the bounce,
+		// radius = the trace length in metres.
+		void set_gi(bool enabled, float strength, float radius) { m_gi_enabled = enabled && strength > 0.001f; m_gi_strength = strength < 0.0f ? 0.0f : strength; m_gi_radius = radius < 0.25f ? 0.25f : radius; }
+		void set_gi_ground_albedo(float r, float g, float b, bool rsm) { m_gi_albedo = { r < 0 ? 0 : r, g < 0 ? 0 : g, b < 0 ? 0 : b }; m_rsm_enabled = rsm; }
 		void set_ssao(bool enabled, float radius, float intensity)
 		{
 			m_ssao_enabled = enabled && intensity > 0.001f;
@@ -203,6 +208,10 @@ namespace vortex::graphics::sdlgpu
 		void add_point_light(const PointLightData& light);
 		void add_spot_light(const SpotLightData& light);
 		void set_fog(const DirectX::XMFLOAT3& color, float density, float height_y, float height_falloff);
+		void set_scene_exposure(float multiplier) { m_frame_constants.scene_exposure = multiplier > 0.0f ? multiplier : 0.5f; }
+		void set_fog_sun_glow(float glow) { m_frame_constants.fog_sun_glow = glow > 0.0f ? glow : 0.0f; }
+		void set_tonemapper(u32 mode) { m_frame_constants.tonemapper = mode > 1u ? 1u : mode; }
+		void set_directional_shadow_softness(float texels) { m_dir_shadow_softness = texels < 1.0f ? 1.0f : (texels > 8.0f ? 8.0f : texels); }
 
 		PostFx& postfx() { return m_postfx; }
 		float elapsed_seconds() const
@@ -259,9 +268,11 @@ namespace vortex::graphics::sdlgpu
 		void set_skybox_mode(SkyboxMode mode) { m_skybox_mode = mode; }
 		// Equirect texture sky (#326): the registry texture the fullscreen sky pass samples in SkyboxMode::Texture —
 		// behind everything at the far plane, no depth write, centred on whichever camera renders the frame.
-		void set_skybox_texture(id::id_type texture, float exposure, float rotation_radians)
+		// hdr: 0 = an 8-bit picture shown as it is; 1 = a float picture shown the classic way (gamma-encoded, clamped at white);
+		// 2 = a float picture run through the scene exposure + the tonemapper like the lit surfaces
+		void set_skybox_texture(id::id_type texture, float exposure, float rotation_radians, int hdr = 0)
 		{
-			m_sky_texture = texture; m_sky_exposure = exposure; m_sky_rotation = rotation_radians;
+			m_sky_texture = texture; m_sky_exposure = exposure; m_sky_rotation = rotation_radians; m_sky_hdr = hdr;
 		}
 		SkyboxMode get_skybox_mode() const { return m_skybox_mode; }
 		void set_skybox_colors(const DirectX::XMFLOAT3& sky, const DirectX::XMFLOAT3& horizon, const DirectX::XMFLOAT3& ground)
@@ -385,13 +396,15 @@ namespace vortex::graphics::sdlgpu
 			DirectX::XMFLOAT3 light_color; float ambient_strength;
 			u32 point_light_count; u32 spot_light_count; u32 padding1[2];
 			DirectX::XMFLOAT3 fog_color; float fog_density;
-			float fog_height_y; float fog_height_falloff; u32 fog_mode; float fog_padding;
-			float shadow_map_texel; u32 shadow_padding[3];
-			float ssao_enabled; float ssao_padding[3];
+			float fog_height_y; float fog_height_falloff; u32 fog_mode; float scene_exposure;   // pre-tonemap multiplier (0.5 = classic)
+			float shadow_map_texel; u32 tonemapper; float gi_strength; u32 shadow_padding1;   // tonemapper: 0 = ACES fit, 1 = PBR Neutral; gi > 0 = bounce light in the AO texture's rgb
+			float ssao_enabled; float ssao_padding[2]; float fog_sun_glow;   // [0..1] = AO UV scale; the sun's glow in the fog
 			// scene sky gradient for specular reflections (w = 1 when a gradient sky is active)
 			DirectX::XMFLOAT4 env_sky; DirectX::XMFLOAT4 env_horizon; DirectX::XMFLOAT4 env_ground;
+			// water refraction / screen-space reflections (#200): x = near, y = far clip of this view — @240
+			DirectX::XMFLOAT4 camera_clip;
 		};
-		static_assert(sizeof(PerFrameConstants) == 240, "PerFrameConstants must byte-match standard.metal");
+		static_assert(sizeof(PerFrameConstants) == 256, "PerFrameConstants must byte-match standard.metal (prefix) / water.metal");
 
 		struct PerObjectConstants
 		{
@@ -449,8 +462,10 @@ namespace vortex::graphics::sdlgpu
 			DirectX::XMFLOAT3 horizon_color; float padding2;
 			DirectX::XMFLOAT3 ground_color; float padding3;
 			DirectX::XMFLOAT3 sun_direction; float sun_intensity;
-			DirectX::XMFLOAT3 sun_color; float padding4;
+			DirectX::XMFLOAT3 sun_color; float tonemapper;   // the HDR path's curve: 0 = ACES fit, 1 = PBR Neutral
 			DirectX::XMFLOAT4 params;   // x: 1 = sample the equirect texture (#326), y: exposure, z: yaw offset (radians)
+			// aerial perspective on the HDR sky (@176): fog colour + density, the sun's direction + glow, the sun's colour
+			DirectX::XMFLOAT4 haze; DirectX::XMFLOAT4 glow_dir; DirectX::XMFLOAT4 glow_color;
 		};
 		struct PostFxCB
 		{
@@ -745,6 +760,7 @@ namespace vortex::graphics::sdlgpu
 		float m_ambient_strength{ 0.3f };
 		bool m_dir_cast_shadows{ false };
 		float m_dir_shadow_strength{ 1.0f }, m_dir_shadow_bias{ 0.0008f }, m_dir_shadow_distance{ 80.0f };
+		float m_dir_shadow_softness{ 1.0f };   // the sun's PCF radius in shadow texels (1 = the 3x3 box, Light ▸ Soft = 4)
 		std::vector<PointLightData> m_point_lights;
 		std::vector<SpotLightData> m_spot_lights;
 		PerFrameConstants m_frame_constants{};
@@ -760,6 +776,18 @@ namespace vortex::graphics::sdlgpu
 		// declared as comparison-sampled depth textures (sampler2DShadow / depth2d), so a colour texture with
 		// a non-comparison sampler is not a legal binding for them under Vulkan.
 		SDL_GPUTexture* m_shadow_dummy{ nullptr };
+		// the opaque colour + depth so far, copied before the transparent pass for the water's refraction / SSR (#200);
+		// bound at fragment slots 11 / 12 while valid, the white texture / the shadow dummy otherwise
+		SDL_GPUTexture* m_scene_color_copy{ nullptr };
+		SDL_GPUTexture* m_scene_depth_copy{ nullptr };
+		u32 m_scene_copy_w{ 0 }, m_scene_copy_h{ 0 };
+		bool m_scene_copy_valid{ false };
+		// screen-space GI (#257 step 1): the last frame's copy is the GI pass's radiance source; its VP reprojects into it
+		bool m_gi_enabled{ false }; float m_gi_strength{ 1.0f }, m_gi_radius{ 2.5f };
+		bool m_rsm_enabled{ true }; DirectX::XMFLOAT3 m_gi_albedo{ 0.45f, 0.38f, 0.30f };   // the bounce from the sun's shadow map and the ground colour it carries
+		DirectX::XMFLOAT4X4 m_gi_prev_view_projection{}; u32 m_gi_prev_w{ 0 }, m_gi_prev_h{ 0 }; bool m_gi_prev_valid{ false };
+		u32 m_transparent_runs_seen{ 0 };   // record_runs: how many transparent runs the last scan found
+		void copy_scene_for_transparents(SDL_GPUCommandBuffer* cmd, const GpuTarget& target);
 		SDL_GPUShader* m_vs_shadow{ nullptr };
 		SDL_GPUShader* m_vs_shadow_skinned_layout{ nullptr };
 		SDL_GPUShader* m_fs_shadow{ nullptr };
@@ -792,6 +820,7 @@ namespace vortex::graphics::sdlgpu
 		u32 m_shadow_spot_count{ 0 };
 		DirectX::XMFLOAT4X4 m_csm_vp[CSM_CASCADES]{};
 		float m_csm_splits[CSM_CASCADES]{};
+		float m_csm_radius[CSM_CASCADES]{};   // each cascade's half extent (m): the bounce gather needs metres per tile uv
 		u32 m_csm_count{ 0 };
 		struct ShadowPoint { int light_index; float strength; float bias; DirectX::XMFLOAT4X4 face_vp[6]; };
 		ShadowPoint m_shadow_points[MAX_SHADOW_POINTS]{};
@@ -810,6 +839,7 @@ namespace vortex::graphics::sdlgpu
 		SkyboxMode m_skybox_mode{ SkyboxMode::Gradient };
 		id::id_type m_sky_texture{ id::invalid_id };
 		float m_sky_exposure{ 1.0f };
+		int m_sky_hdr{ 0 };   // 0 = 8-bit sky, 1 = float sky shown the classic way, 2 = float sky through exposure + tonemapper
 		float m_sky_sh[27]{};
 		bool m_sky_sh_on{ false };
 		// the sky as a reflection (IBL step 2): a registry equirect with mips, bound at fragment slot 10 while valid

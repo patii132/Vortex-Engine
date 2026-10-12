@@ -22,6 +22,11 @@ namespace Editor.Core.Editing
         public bool McpServerEnabled { get; set; }
         /// <summary>Port of the MCP server. A fixed default keeps committed .mcp.json files valid across sessions.</summary>
         public int McpPort { get; set; } = 7420;
+        /// <summary>The scene's post effects (colour grade, bloom, FXAA, vignette, grain, aberration) in the editor's own
+        /// viewport — while building the world AND while playing in it. On by default so the viewport shows the picture the
+        /// game will; off saves a few milliseconds per frame on a slow machine. The standalone player and the game window
+        /// always apply them. Toggled from the viewport toolbar (FX) and the Environment panel.</summary>
+        public bool PostEffectsInViewport { get; set; } = true;
 
         private static string FilePath => Path.Combine(EditorPaths.VortexAppData, "editor-prefs.json");
 

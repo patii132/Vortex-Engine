@@ -46,6 +46,30 @@ static inline float hash21(float2 p)
     return fract(p.x * p.y);
 }
 
+// FXAA 3.11 (the console variant): nine samples, no history — see postfx.hlsl
+static inline float fxaa_luma(float3 c) { return dot(c, float3(0.299, 0.587, 0.114)); }
+static inline float3 fxaa(texture2d<float> src, sampler smp, float2 uv, float2 texel)
+{
+    float3 rgbM = src.sample(smp, uv).rgb;
+    float3 rgbNW = src.sample(smp, uv + float2(-1.0, -1.0) * texel).rgb;
+    float3 rgbNE = src.sample(smp, uv + float2(1.0, -1.0) * texel).rgb;
+    float3 rgbSW = src.sample(smp, uv + float2(-1.0, 1.0) * texel).rgb;
+    float3 rgbSE = src.sample(smp, uv + float2(1.0, 1.0) * texel).rgb;
+    float lumaM = fxaa_luma(rgbM), lumaNW = fxaa_luma(rgbNW), lumaNE = fxaa_luma(rgbNE), lumaSW = fxaa_luma(rgbSW), lumaSE = fxaa_luma(rgbSE);
+    float lumaMin = min(lumaM, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
+    float lumaMax = max(lumaM, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
+    float2 dir;
+    dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
+    dir.y = ((lumaNW + lumaSW) - (lumaNE + lumaSE));
+    float dirReduce = max((lumaNW + lumaNE + lumaSW + lumaSE) * (0.25 * (1.0 / 8.0)), 1.0 / 128.0);
+    float rcpDirMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);
+    dir = min(float2(8.0), max(float2(-8.0), dir * rcpDirMin)) * texel;
+    float3 rgbA = 0.5 * (src.sample(smp, uv + dir * (1.0 / 3.0 - 0.5)).rgb + src.sample(smp, uv + dir * (2.0 / 3.0 - 0.5)).rgb);
+    float3 rgbB = rgbA * 0.5 + 0.25 * (src.sample(smp, uv + dir * -0.5).rgb + src.sample(smp, uv + dir * 0.5).rgb);
+    float lumaB = fxaa_luma(rgbB);
+    return (lumaB < lumaMin || lumaB > lumaMax) ? rgbA : rgbB;
+}
+
 fragment float4 PostFxPS(BlitOut in [[stage_in]], constant PostFxCB& c [[buffer(0)]],
                          texture2d<float> src [[texture(0)]], sampler smp [[sampler(0)]],
                          texture2d<float> bloom_tex [[texture(1)]], sampler bloom_smp [[sampler(1)]])
@@ -60,6 +84,10 @@ fragment float4 PostFxPS(BlitOut in [[stage_in]], constant PostFxCB& c [[buffer(
         col.r = src.sample(smp, uv + from_c * amt).r;
         col.g = src.sample(smp, uv).g;
         col.b = src.sample(smp, uv - from_c * amt).b;
+    }
+    else if (c.flags & 64u)
+    {
+        col = fxaa(src, smp, uv, c.texel_size);   // anti-aliasing on the LDR picture
     }
     else
     {
